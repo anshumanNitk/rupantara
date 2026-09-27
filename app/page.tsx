@@ -2,14 +2,16 @@ import { buildWorld } from '@/world/compiler';
 import { RPA_ARCHITECTURE } from '@/fixtures/rpaArchitecture';
 import { ECOMMERCE_ARCHITECTURE } from '@/fixtures/ecommerceArchitecture';
 import { RPA_STORY_EVENTS } from '@/fixtures/rpaStory';
-import { WorldExplorer } from '@/components/visualization/WorldExplorer';
+import { WorldStudio } from '@/components/visualization/WorldStudio';
 
 /**
  * Server component.
  *
- * The deterministic pipeline runs on the server: Architecture Graph -> World
- * Specification -> Placed World Specification. The client receives only data.
- * This is the boundary that keeps "architecture is data" true.
+ * Renders a default world so the page is useful immediately, then hands control
+ * to the client studio, which can analyze any public repository the user pastes.
+ *
+ * The deterministic pipeline runs on the server for the initial world:
+ * Architecture Graph -> World Specification -> Placed World Specification.
  */
 
 export interface PageProps {
@@ -20,14 +22,15 @@ export default function Page({ searchParams }: PageProps) {
   const repo = searchParams.repo === 'shopfront' ? 'shopfront' : 'rpa-agent';
 
   const source = repo === 'shopfront' ? ECOMMERCE_ARCHITECTURE : RPA_ARCHITECTURE;
-  const { architecture, world, placed } = buildWorld(source);
+  const { architecture } = buildWorld(source);
+
+  const label = `${architecture.repository.owner ?? ''}/${architecture.repository.name}`.replace(/^\//, '');
 
   return (
     <main style={{ width: '100vw', height: '100vh', position: 'relative' }}>
-      <WorldExplorer
-        architecture={architecture}
-        world={world}
-        placed={placed}
+      <WorldStudio
+        initialArchitecture={architecture}
+        initialLabel={label}
         initialEvents={repo === 'rpa-agent' ? RPA_STORY_EVENTS : []}
       />
     </main>

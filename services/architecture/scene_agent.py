@@ -75,7 +75,7 @@ import type {{ PlacedWorld }} from '@/world/schemas/world';
 export default function GeneratedScene({{ world }}: {{ world: PlacedWorld }}) {{
   return (
     <>
-      {/* compose the scene here */}
+      {{/* compose the scene here */}}
     </>
   );
 }}

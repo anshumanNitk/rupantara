@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from typing import Any, Literal, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -25,6 +26,7 @@ from pydantic import ValidationError
 
 from contracts import ArchitectureGraph, RepositoryRef
 from provider import get_model
+from repo_fetcher import RepoRef, RepositoryFetchError, fetch_repository, parse_repo_url
 
 logger = logging.getLogger(__name__)
 
@@ -96,26 +98,90 @@ class AgentState(TypedDict, total=False):
     errors: list[str]
     attempts: int
     warnings: list[str]
+    fetch_error: str
 
 
 def _fetch_context(state: AgentState) -> AgentState:
-    """Loads repository context.
+    """Loads real repository context from the code host.
 
-    In production this calls the existing repository/AI subsystem. For the MVP
-    it reads a pre-supplied context blob so the graph can be exercised without
-    network access to a code host.
+    If a context blob was supplied explicitly (tests, offline demos) it is used
+    as-is. Otherwise the repository is fetched from GitHub so the agent reasons
+    about ACTUAL code rather than guessing from the repository name.
+
+    A fetch failure is recorded as a warning and the agent falls back to
+    name-based inference, so the pipeline still produces a usable graph.
     """
-    context = state.get("repository_context") or ""
-    if not context:
-        repo = state["repository"]
-        context = (
-            f"Repository: {repo.get('owner', '')}/{repo.get('name', '')} "
-            f"(branch: {repo.get('branch', 'main')}).\n"
-            "No file contents were supplied. Infer a plausible architecture from "
-            "the repository name and branch, and mark uncertain nodes as type "
-            "'unknown'."
+    supplied = state.get("repository_context") or ""
+    if supplied:
+        return {
+            **state,
+            "repository_context": supplied,
+            "attempts": 0,
+            "errors": [],
+            "warnings": [],
+            "fetch_error": "",
+        }
+
+    repo = state["repository"]
+    warnings: list[str] = []
+    fetch_error = ""
+
+    try:
+        ref = RepoRef(
+            owner=repo.get("owner") or "",
+            name=repo.get("name") or "",
+            branch=repo.get("branch") or None,
+            provider=repo.get("provider") or "github",
         )
-    return {**state, "repository_context": context, "attempts": 0, "errors": [], "warnings": []}
+        if not ref.owner or not ref.name:
+            raise RepositoryFetchError("Repository owner and name are required")
+
+        context = fetch_repository(ref)
+        context_text = context.to_prompt()
+
+        if context.truncated:
+            warnings.append("Repository context was truncated to fit the model window.")
+        if not context.files:
+            warnings.append("No file contents could be read; analysis is structure-only.")
+
+        logger.info(
+            "Fetched %s/%s: %d tree entries, %d files",
+            ref.owner,
+            ref.name,
+            len(context.tree),
+            len(context.files),
+        )
+
+        return {
+            **state,
+            "repository_context": context_text,
+            "attempts": 0,
+            "errors": [],
+            "warnings": warnings,
+            "fetch_error": "",
+        }
+
+    except RepositoryFetchError as exc:
+        fetch_error = str(exc)
+        logger.warning("Repository fetch failed: %s", exc)
+        warnings.append(f"Could not read the repository ({exc}). Falling back to name-based inference.")
+
+    context = (
+        f"Repository: {repo.get('owner', '')}/{repo.get('name', '')} "
+        f"(branch: {repo.get('branch') or 'default'}).\n"
+        "The repository contents could not be read. Infer a plausible architecture "
+        "from the repository name and branch, and mark uncertain nodes as type "
+        "'unknown'."
+    )
+
+    return {
+        **state,
+        "repository_context": context,
+        "attempts": 0,
+        "errors": [],
+        "warnings": warnings,
+        "fetch_error": fetch_error,
+    }
 
 
 def _extract_graph(state: AgentState) -> AgentState:
@@ -227,8 +293,8 @@ def build_architecture_agent():
 def analyze_repository(
     repository: RepositoryRef,
     repository_context: str | None = None,
-) -> ArchitectureGraph:
-    """Runs the agent and returns a validated Architecture Graph."""
+) -> tuple[ArchitectureGraph, list[str]]:
+    """Runs the agent and returns a validated Architecture Graph plus warnings."""
     agent = build_architecture_agent()
 
     result = agent.invoke(
@@ -238,15 +304,28 @@ def analyze_repository(
         }
     )
 
-    return ArchitectureGraph.model_validate(result["architecture"])
+    graph = ArchitectureGraph.model_validate(result["architecture"])
+    return graph, list(result.get("warnings", []))
+
+
+def analyze_repository_url(url: str) -> tuple[ArchitectureGraph, list[str]]:
+    """Parses a repository URL and runs the agent against the real repository."""
+    ref = parse_repo_url(url)
+
+    repository = RepositoryRef(
+        provider=ref.provider,
+        owner=ref.owner,
+        name=ref.name,
+        branch=ref.branch,
+    )
+
+    return analyze_repository(repository)
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    repo = RepositoryRef(
-        provider="github",
-        owner=os.getenv("DEMO_OWNER", "anshumanNitk"),
-        name=os.getenv("DEMO_REPO", "Robotic-Process-Automation"),
-        branch=os.getenv("DEMO_BRANCH", "procedure"),
-    )
-    print(analyze_repository(repo).model_dump_json(indent=2))
+    target = os.getenv("DEMO_REPO_URL", "https://github.com/anshumanNitk/Robotic-Process-Automation")
+    graph, warnings = analyze_repository_url(target)
+    for warning in warnings:
+        print(f"WARNING: {warning}", file=sys.stderr)
+    print(graph.model_dump_json(indent=2))

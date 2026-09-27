@@ -57,11 +57,11 @@ export function Toolbar({
     <div
       style={{
         position: 'absolute',
-        top: 16,
+        top: 372,
         left: 16,
         zIndex: 20,
         width: 300,
-        maxHeight: 'calc(100vh - 32px)',
+        maxHeight: 'calc(100vh - 388px)',
         overflow: 'auto',
         background: '#0f141d',
         border: '1px solid #2b3445',

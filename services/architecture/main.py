@@ -15,10 +15,12 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from architecture_agent import analyze_repository
+from architecture_agent import analyze_repository, analyze_repository_url
 from contracts import AnalyzeRequest, AnalyzeResponse, ArchitectureGraph
+from repo_fetcher import RepositoryFetchError, parse_repo_url
 from scene_agent import generate_scene
 from scene_validator import validate_scene_code
 
@@ -30,6 +32,27 @@ app = FastAPI(
     description="Repository -> Architecture Graph, and Placed World -> Scene Program.",
     version="0.1.0",
 )
+
+# The Next.js dev server and any local preview origin.
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+
+class AnalyzeUrlRequest(BaseModel):
+    """Analyze a public repository by URL or `owner/name` shorthand."""
+
+    url: str = Field(..., description="GitHub URL or owner/name shorthand")
+    branch: str | None = Field(default=None, description="Optional branch override")
 
 
 class SceneGenerateRequest(BaseModel):
@@ -64,12 +87,38 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     The graph is validated against the contract before it leaves this service.
     """
     try:
-        architecture: ArchitectureGraph = analyze_repository(request.repository)
+        architecture, warnings = analyze_repository(request.repository)
     except Exception as exc:  # noqa: BLE001 - surfaced to the caller as 502
         logger.exception("Architecture analysis failed")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    return AnalyzeResponse(architecture=architecture)
+    return AnalyzeResponse(architecture=architecture, warnings=warnings)
+
+
+@app.post("/projects/analyze-url", response_model=AnalyzeResponse)
+def analyze_url(request: AnalyzeUrlRequest) -> AnalyzeResponse:
+    """Analyze a public repository from a pasted URL.
+
+    This is the endpoint the frontend uses. It fetches the real repository
+    structure and key files, then runs the Architecture Agent over them.
+    """
+    try:
+        ref = parse_repo_url(request.url)
+    except RepositoryFetchError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if request.branch:
+        ref.branch = request.branch
+
+    try:
+        architecture, warnings = analyze_repository_url(request.url)
+    except RepositoryFetchError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Architecture analysis failed for %s", request.url)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return AnalyzeResponse(architecture=architecture, warnings=warnings)
 
 
 @app.post("/projects/scene/generate", response_model=SceneGenerateResponse)
