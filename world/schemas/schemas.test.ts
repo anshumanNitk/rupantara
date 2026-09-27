@@ -65,6 +65,73 @@ describe('Architecture Graph schema', () => {
     expect(result.ok).toBe(false);
     expect(result.errors.join(' ')).toMatch(/unrecognized key/i);
   });
+
+  /**
+   * Regression: the Python service (Pydantic) serialises absent values as JSON
+   * `null`, while hand-authored fixtures omit them. An earlier schema used
+   * `.optional()` (undefined only), so Python-produced graphs passed Pydantic
+   * validation and then failed in the browser with
+   * "repository.branch: Expected string, received null".
+   */
+  it('accepts a Python-style graph with explicit nulls', () => {
+    const pythonStyle = {
+      schema_version: '1.0',
+      repository: {
+        name: 'rpa-agent',
+        branch: null,
+        provider: 'github',
+        owner: 'anshumanNitk',
+      },
+      groups: [
+        { id: 'core', label: 'Core', diagram_region: 'center', description: null },
+      ],
+      nodes: [
+        {
+          id: 'agent',
+          label: 'Agent',
+          type: 'agent',
+          group: 'core',
+          parent: null,
+          metadata: {},
+          spatial: {
+            zone: null,
+            anchor: null,
+            relation: null,
+            placement: null,
+          },
+          source: { file: null, symbol: null, line: null },
+        },
+      ],
+      edges: [
+        {
+          id: 'e1',
+          source: 'agent',
+          target: 'agent',
+          type: 'dependency',
+          label: null,
+          metadata: {},
+        },
+      ],
+    };
+
+    const result = validate(ArchitectureGraphSchema, pythonStyle, validateArchitectureGraph);
+    expect(result.errors).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
+
+  it('accepts a node with source omitted entirely', () => {
+    const withoutSource = {
+      ...RPA_ARCHITECTURE,
+      nodes: RPA_ARCHITECTURE.nodes.map((node) => {
+        const { source: _omitted, ...rest } = node;
+        return rest;
+      }),
+    };
+
+    const result = validate(ArchitectureGraphSchema, withoutSource, validateArchitectureGraph);
+    expect(result.errors).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
 });
 
 describe('Runtime Event schema', () => {

@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from architecture_agent import analyze_repository, analyze_repository_url
 from contracts import AnalyzeRequest, AnalyzeResponse, ArchitectureGraph
-from repo_fetcher import RepositoryFetchError, parse_repo_url
+from repo_fetcher import RateLimitError, RepositoryFetchError, parse_repo_url
 from scene_agent import generate_scene
 from scene_validator import validate_scene_code
 
@@ -80,6 +80,37 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/github/rate-limit")
+def github_rate_limit() -> dict[str, object]:
+    """Reports the current GitHub API quota.
+
+    Useful for diagnosing 403s: shows whether a token is configured and how many
+    requests remain before the limit resets.
+    """
+    import os
+
+    import httpx
+
+    authenticated = bool(os.getenv("GITHUB_TOKEN", "").strip())
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "architecture-to-3d-world"}
+    if authenticated:
+        headers["Authorization"] = f"Bearer {os.getenv('GITHUB_TOKEN', '').strip()}"
+
+    try:
+        response = httpx.get("https://api.github.com/rate_limit", headers=headers, timeout=10.0)
+        response.raise_for_status()
+        payload = response.json()
+        core = payload.get("resources", {}).get("core", {})
+        return {
+            "authenticated": authenticated,
+            "limit": core.get("limit"),
+            "remaining": core.get("remaining"),
+            "reset": core.get("reset"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"authenticated": authenticated, "error": str(exc)}
+
+
 @app.post("/projects/analyze", response_model=AnalyzeResponse)
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     """Repository -> Architecture Graph.
@@ -88,6 +119,8 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     """
     try:
         architecture, warnings = analyze_repository(request.repository)
+    except RateLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 - surfaced to the caller as 502
         logger.exception("Architecture analysis failed")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -112,6 +145,9 @@ def analyze_url(request: AnalyzeUrlRequest) -> AnalyzeResponse:
 
     try:
         architecture, warnings = analyze_repository_url(request.url)
+    except RateLimitError as exc:
+        # 429 tells the client this is transient and retryable after a wait.
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     except RepositoryFetchError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001

@@ -61,11 +61,11 @@ export const WorldEntitySchema = z.object({
       architecture_node_id: z.string(),
       source: z
         .object({
-          file: z.string().optional(),
-          symbol: z.string().optional(),
-          line: z.number().int().nonnegative().optional(),
+          file: z.string().nullish(),
+          symbol: z.string().nullish(),
+          line: z.number().int().nonnegative().nullish(),
         })
-        .optional(),
+        .nullish(),
     })
     .optional(),
 });
@@ -166,10 +166,10 @@ export function validateWorldSpecification(world: WorldSpecification): string[] 
   }
 
   for (const entity of world.entities) {
-    if (entity.zone !== null && !zoneIds.has(entity.zone)) {
+    if (entity.zone != null && !zoneIds.has(entity.zone)) {
       errors.push(`Entity "${entity.id}" references unknown zone "${entity.zone}"`);
     }
-    if (entity.spatial.anchor !== null && !entityIds.has(entity.spatial.anchor)) {
+    if (entity.spatial.anchor != null && !entityIds.has(entity.spatial.anchor)) {
       errors.push(`Entity "${entity.id}" references unknown anchor "${entity.spatial.anchor}"`);
     }
   }

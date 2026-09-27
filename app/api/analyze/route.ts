@@ -39,8 +39,10 @@ export async function POST(request: Request) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, branch }),
-      // Analysis involves a model call; allow generous time.
-      signal: AbortSignal.timeout(180_000),
+      // Analysis fetches the repository and calls the model, with a repair
+      // retry on invalid output. Two model passes plus a tarball download can
+      // exceed 3 minutes, so allow a generous ceiling well above that.
+      signal: AbortSignal.timeout(600_000),
     });
 
     const payload = await response.json().catch(() => null);
@@ -51,7 +53,11 @@ export async function POST(request: Request) {
           ? String((payload as { detail: unknown }).detail)
           : `Analysis service returned ${response.status}.`;
 
-      return NextResponse.json({ error: detail }, { status: response.status });
+      // 429 is transient and retryable — pass it through so the UI can say so.
+      return NextResponse.json(
+        { error: detail, retryable: response.status === 429 },
+        { status: response.status },
+      );
     }
 
     return NextResponse.json(payload);

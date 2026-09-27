@@ -67,10 +67,15 @@ Then edit `.env` and set at minimum:
 
 ```
 OPENROUTER_API_KEY=sk-or-v1-...        # required — model provider
-GITHUB_TOKEN=ghp_...                   # optional — raises GitHub rate limit 60 → 5000/hour
+GITHUB_TOKEN=ghp_...                   # strongly recommended — see below
 ```
 
 `.env` is gitignored. Never put real keys in `.env.example`.
+
+> **Why `GITHUB_TOKEN` matters:** unauthenticated GitHub allows only 60 API
+> requests/hour. Two fixture analyses will not consume that, but iterating on
+> real repositories will. A classic token with **no scopes** raises the limit to
+> 5000/hour and is enough for public repositories.
 
 ### 2. Start the Architecture Intelligence service (terminal 1)
 
@@ -134,6 +139,32 @@ Paste URL
 `repo_fetcher.py` selects the most architecture-revealing files (manifests,
 entrypoints, routes, services, infra) and skips vendored/binary paths. Context is
 capped so a large repository cannot exhaust the model window.
+
+### API budget
+
+GitHub's unauthenticated limit is **60 requests/hour**, so the number of calls
+per analysis matters. A full analysis costs exactly **2 requests**:
+
+1. `GET /repos/{owner}/{repo}` — metadata + default branch
+2. `GET /repos/{owner}/{repo}/git/trees/{ref}?recursive=1` — full tree **with
+   inlined blob content**
+
+The Git Trees API inlines content (base64) for files under 1 MB, so no
+per-file requests are needed. This is a regression guard: an earlier version
+fetched each file individually (up to 62 requests), which could exhaust the
+entire hourly quota in a single analysis.
+
+### Rate limits
+
+If you hit a 403, the service returns **429** with an actionable message
+including the reset time. Check your quota at any time:
+
+```bash
+curl http://127.0.0.1:8000/github/rate-limit
+```
+
+To raise the limit from 60 to 5000 requests/hour, set `GITHUB_TOKEN` in `.env`.
+A classic token with **no scopes** is sufficient for public repositories.
 
 The frontend never inspects repository source. It receives a validated
 Architecture Graph and treats it as data.

@@ -35,6 +35,7 @@ export function RepoInput({
   const [url, setUrl] = useState('');
   const [branch, setBranch] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [retryable, setRetryable] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
 
   const handleAnalyze = useCallback(async () => {
@@ -46,6 +47,7 @@ export function RepoInput({
 
     setAnalyzing(true);
     setError(null);
+    setRetryable(false);
     setWarnings([]);
 
     try {
@@ -57,10 +59,15 @@ export function RepoInput({
 
       const payload = (await response.json()) as
         | { architecture: ArchitectureGraph; warnings?: string[] }
-        | { error: string };
+        | { error: string; retryable?: boolean };
 
       if (!response.ok || 'error' in payload) {
-        setError('error' in payload ? payload.error : `Request failed (${response.status}).`);
+        if ('error' in payload) {
+          setError(payload.error);
+          setRetryable(payload.retryable ?? false);
+        } else {
+          setError(`Request failed (${response.status}).`);
+        }
         return;
       }
 
@@ -199,6 +206,11 @@ export function RepoInput({
           }}
         >
           {error}
+          {retryable && (
+            <div style={{ marginTop: 6, color: '#f5c451' }}>
+              This is temporary — wait for the limit to reset, then try again.
+            </div>
+          )}
         </div>
       )}
 

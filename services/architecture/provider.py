@@ -72,6 +72,11 @@ def get_model(role: str = "architecture", temperature: float = 0.0) -> ChatOpenA
         base_url=os.getenv("OPENROUTER_BASE_URL", DEFAULT_BASE_URL),
         temperature=temperature,
         default_headers=_default_headers(),
-        timeout=120,
-        max_retries=2,
+        # Generating a full architecture graph for a real repository takes
+        # 60-150s with a reasoning model. A 120s ceiling sat right on that
+        # boundary, so calls intermittently timed out and retried, doubling
+        # latency for no benefit.
+        timeout=int(os.getenv("OPENROUTER_TIMEOUT", "300")),
+        # A timeout retry here costs minutes, not milliseconds, so retry once.
+        max_retries=1,
     )

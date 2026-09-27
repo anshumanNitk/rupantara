@@ -76,15 +76,17 @@ export type EdgeType = z.infer<typeof EdgeTypeSchema>;
 /**
  * Semantic placement hint. The AI may express WHERE something belongs
  * relative to the diagram, but must never emit raw x/y/z coordinates.
+ *
+ * Fields are `.nullish()` because the Python service serialises absent values
+ * as JSON `null`, while hand-authored fixtures simply omit them. Both are valid.
  */
 export const SpatialHintSchema = z.object({
-  zone: z.string().optional(),
-  anchor: z.string().nullable().optional(),
-  relation: z.enum(['dependency', 'containment', 'sibling', 'flow']).nullable().optional(),
+  zone: z.string().nullish(),
+  anchor: z.string().nullish(),
+  relation: z.enum(['dependency', 'containment', 'sibling', 'flow']).nullish(),
   placement: z
     .enum(['center', 'near_parent', 'inside_parent', 'adjacent', 'orbit'])
-    .nullable()
-    .optional(),
+    .nullish(),
 });
 export type SpatialHint = z.infer<typeof SpatialHintSchema>;
 
@@ -93,7 +95,7 @@ export const ArchitectureGroupSchema = z
     id: z.string().min(1),
     label: z.string().min(1),
     diagram_region: DiagramRegionSchema,
-    description: z.string().optional(),
+    description: z.string().nullish(),
   })
   .strict();
 export type ArchitectureGroup = z.infer<typeof ArchitectureGroupSchema>;
@@ -108,18 +110,18 @@ export const ArchitectureNodeSchema = z
     id: z.string().min(1),
     label: z.string().min(1),
     type: NodeTypeSchema,
-    group: z.string().nullable(),
-    parent: z.string().nullable(),
+    group: z.string().nullish(),
+    parent: z.string().nullish(),
     metadata: z.record(z.unknown()).default({}),
-    spatial: SpatialHintSchema.optional(),
+    spatial: SpatialHintSchema.nullish(),
     /** Provenance back to the repository. Preserved verbatim from the analyzer. */
     source: z
       .object({
-        file: z.string().optional(),
-        symbol: z.string().optional(),
-        line: z.number().int().nonnegative().optional(),
+        file: z.string().nullish(),
+        symbol: z.string().nullish(),
+        line: z.number().int().nonnegative().nullish(),
       })
-      .optional(),
+      .nullish(),
   })
   .strict();
 export type ArchitectureNode = z.infer<typeof ArchitectureNodeSchema>;
@@ -130,7 +132,7 @@ export const ArchitectureEdgeSchema = z
     source: z.string().min(1),
     target: z.string().min(1),
     type: EdgeTypeSchema,
-    label: z.string().optional(),
+    label: z.string().nullish(),
     metadata: z.record(z.unknown()).default({}),
   })
   .strict();
@@ -141,9 +143,9 @@ export const ArchitectureGraphSchema = z
     schema_version: z.literal('1.0'),
     repository: z.object({
       name: z.string().min(1),
-      branch: z.string().optional(),
-      provider: z.string().optional(),
-      owner: z.string().optional(),
+      branch: z.string().nullish(),
+      provider: z.string().nullish(),
+      owner: z.string().nullish(),
     }),
     groups: z.array(ArchitectureGroupSchema).default([]),
     nodes: z.array(ArchitectureNodeSchema).min(1),
@@ -167,10 +169,10 @@ export function validateArchitectureGraph(graph: ArchitectureGraph): string[] {
   }
 
   for (const node of graph.nodes) {
-    if (node.group !== null && !groupIds.has(node.group)) {
+    if (node.group != null && !groupIds.has(node.group)) {
       errors.push(`Node "${node.id}" references unknown group "${node.group}"`);
     }
-    if (node.parent !== null && !nodeIds.has(node.parent)) {
+    if (node.parent != null && !nodeIds.has(node.parent)) {
       errors.push(`Node "${node.id}" references unknown parent "${node.parent}"`);
     }
     if (node.parent === node.id) {
@@ -188,10 +190,10 @@ export function validateArchitectureGraph(graph: ArchitectureGraph): string[] {
   }
 
   // Detect parent cycles.
-  const parentOf = new Map(graph.nodes.map((n) => [n.id, n.parent]));
+  const parentOf = new Map(graph.nodes.map((n) => [n.id, n.parent ?? null]));
   for (const node of graph.nodes) {
     const seen = new Set<string>([node.id]);
-    let cursor = parentOf.get(node.id) ?? null;
+    let cursor: string | null = parentOf.get(node.id) ?? null;
     while (cursor !== null) {
       if (seen.has(cursor)) {
         errors.push(`Parent cycle detected involving node "${node.id}"`);

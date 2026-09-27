@@ -134,7 +134,7 @@ function seedPositions(
   // --- Roots: grid within the zone bounds ---
   const rootsByZone = new Map<string, MutableEntity[]>();
   for (const entity of sorted) {
-    if (entity.anchor !== null && byId.has(entity.anchor)) continue;
+    if (entity.anchor != null && byId.has(entity.anchor)) continue;
     const key = entity.zone ?? 'ungrouped';
     const list = rootsByZone.get(key) ?? [];
     list.push(entity);
@@ -166,7 +166,7 @@ function seedPositions(
   // --- Children: orbit their parent deterministically ---
   const childrenByParent = new Map<string, MutableEntity[]>();
   for (const entity of sorted) {
-    if (entity.anchor === null || !byId.has(entity.anchor)) continue;
+    if (entity.anchor == null || !byId.has(entity.anchor)) continue;
     const list = childrenByParent.get(entity.anchor) ?? [];
     list.push(entity);
     childrenByParent.set(entity.anchor, list);
@@ -235,7 +235,7 @@ function resolveCollisions(entities: MutableEntity[], rng: () => number): number
 
     // Topology preservation: re-tether children to their parents.
     for (const entity of ordered) {
-      if (entity.anchor === null) continue;
+      if (entity.anchor == null) continue;
       const parent = byId.get(entity.anchor);
       if (!parent) continue;
 

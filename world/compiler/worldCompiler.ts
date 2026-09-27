@@ -53,7 +53,7 @@ function compileZones(graph: ArchitectureGraph): WorldZone[] {
     spatial_hint: { region: group.diagram_region },
   }));
 
-  const hasUngrouped = graph.nodes.some((node) => node.group === null);
+  const hasUngrouped = graph.nodes.some((node) => node.group == null);
   if (hasUngrouped) {
     zones.push({
       id: 'ungrouped',
@@ -68,17 +68,22 @@ function compileZones(graph: ArchitectureGraph): WorldZone[] {
 function compileEntity(node: ArchitectureNode): WorldEntity {
   const mapping = resolveEntityMapping(node.type);
 
+  // Normalise nullish -> null so the World Specification has one canonical
+  // representation regardless of whether the source was JSON null or omitted.
+  const parent = node.parent ?? null;
+  const group = node.group ?? null;
+
   return {
     id: node.id,
     semantic_type: node.type,
     archetype: mapping.archetype,
-    zone: node.group ?? 'ungrouped',
+    zone: group ?? 'ungrouped',
     spatial: {
-      anchor: node.spatial?.anchor ?? node.parent ?? null,
-      relation: node.spatial?.relation ?? (node.parent !== null ? 'containment' : null),
+      anchor: node.spatial?.anchor ?? parent,
+      relation: node.spatial?.relation ?? (parent !== null ? 'containment' : null),
       placement:
         node.spatial?.placement ??
-        (node.parent !== null ? 'near_parent' : node.group === null ? 'center' : 'adjacent'),
+        (parent !== null ? 'near_parent' : group === null ? 'center' : 'adjacent'),
     },
     visual: {
       primitive: mapping.primitive,

@@ -9,7 +9,6 @@ from __future__ import annotations
 import pytest
 
 from scene_validator import validate_scene_code
-
 VALID_SCENE = """
 import { AgentControlCenter, DataCenter, Road } from '@/scene-sdk';
 import type { PlacedWorld } from '@/world/schemas/world';

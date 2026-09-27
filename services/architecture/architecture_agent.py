@@ -26,7 +26,13 @@ from pydantic import ValidationError
 
 from contracts import ArchitectureGraph, RepositoryRef
 from provider import get_model
-from repo_fetcher import RepoRef, RepositoryFetchError, fetch_repository, parse_repo_url
+from repo_fetcher import (
+    RateLimitError,
+    RepoRef,
+    RepositoryFetchError,
+    fetch_repository,
+    parse_repo_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +56,7 @@ You must output ONLY valid JSON matching this exact shape:
       "id": str, "label": str, "type": NODE_TYPE,
       "group": str|null, "parent": str|null,
       "metadata": { ... },
-      "spatial": { "zone": str|null, "anchor": str|null, "relation": str|null, "placement": str|null } | null,
+      "spatial": { "zone": str|null, "anchor": str|null, "relation": RELATION, "placement": PLACEMENT } | null,
       "source": { "file": str|null, "symbol": str|null, "line": int|null } | null
     }
   ],
@@ -69,6 +75,13 @@ gateway, scheduler, monitor, unknown.
 EDGE_TYPE is one of: dependency, data_flow, control_flow, memory, api_call,
 event, sync, async, ownership, unknown.
 
+RELATION is one of: dependency, containment, sibling, flow — or null.
+PLACEMENT is one of: center, near_parent, inside_parent, adjacent, orbit — or null.
+
+`spatial` is ADVISORY and optional. Use null when a node needs no special hint.
+Keep `relation` and `placement` to the exact values above; do NOT write prose
+there (put explanation in `metadata`).
+
 HARD RULES — violating any of these makes your output invalid:
 
 1. NEVER output x, y or z coordinates. Not on nodes, not anywhere.
@@ -86,6 +99,17 @@ HARD RULES — violating any of these makes your output invalid:
 Think about the architecture diagram first: which components sit at the centre,
 which are upstream/downstream, which are grouped together, and which contain
 others. Then encode that as regions, groups and parent relationships.
+
+OUTPUT DISCIPLINE — this matters for latency:
+
+- Aim for 10-25 nodes: the significant architectural components, not every file.
+- Keep `metadata` SHORT. At most 2-3 keys, each a short string or small list.
+  Do NOT write sentences or paragraphs. Example: { "framework": "Django" }.
+  Use `{}` (or null) when a node or edge needs no extra detail — never omit the
+  key entirely on a node, and never put prose in it.
+- Omit `source` when unknown. Do not invent file paths.
+- Set `spatial` to null unless a node genuinely needs a placement hint.
+- Do not repeat information between `label`, `metadata` and `spatial`.
 
 Output JSON only. No prose, no markdown fences."""
 
@@ -137,12 +161,23 @@ def _fetch_context(state: AgentState) -> AgentState:
             raise RepositoryFetchError("Repository owner and name are required")
 
         context = fetch_repository(ref)
+
+        # A successful fetch that yields no readable files is a hard failure.
+        # Previously this was only a warning, so the agent ran against a context
+        # containing just a file tree, burned several model calls, and then
+        # failed with a confusing schema error ~3 minutes later. Failing fast
+        # makes the real cause obvious.
+        if not context.files:
+            raise RepositoryFetchError(
+                f"No readable source files were found in {ref.owner}/{ref.name} "
+                f"({len(context.tree)} entries scanned). The repository may contain "
+                "only binary assets, or its files may be too large to read."
+            )
+
         context_text = context.to_prompt()
 
         if context.truncated:
             warnings.append("Repository context was truncated to fit the model window.")
-        if not context.files:
-            warnings.append("No file contents could be read; analysis is structure-only.")
 
         logger.info(
             "Fetched %s/%s: %d tree entries, %d files",
@@ -160,6 +195,13 @@ def _fetch_context(state: AgentState) -> AgentState:
             "warnings": warnings,
             "fetch_error": "",
         }
+
+    except RateLimitError as exc:
+        # Rate limiting is a hard stop: falling back to name-based inference
+        # would silently produce a fabricated architecture, which is worse than
+        # failing. Surface it so the caller can tell the user to wait or set a token.
+        logger.warning("GitHub rate limit reached: %s", exc)
+        raise
 
     except RepositoryFetchError as exc:
         fetch_error = str(exc)
