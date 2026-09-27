@@ -55,19 +55,88 @@ A repository change changes the generated architecture/world/scene. It never req
 
 ## Quick start
 
+Two processes: the Next.js app and the Python Architecture Intelligence service.
+
+### 1. Configure
+
 ```bash
-npm install
-npm run dev          # http://localhost:3000
-npm test             # 34 TypeScript tests
-npm run typecheck    # strict mode
+cp .env.example .env
 ```
 
-Two repositories are wired up as fixtures:
+Then edit `.env` and set at minimum:
+
+```
+OPENROUTER_API_KEY=sk-or-v1-...        # required — model provider
+GITHUB_TOKEN=ghp_...                   # optional — raises GitHub rate limit 60 → 5000/hour
+```
+
+`.env` is gitignored. Never put real keys in `.env.example`.
+
+### 2. Start the Architecture Intelligence service (terminal 1)
+
+```bash
+cd services/architecture
+python -m pip install -r requirements.txt
+python -m uvicorn main:app --reload --port 8000
+```
+
+Verify: <http://127.0.0.1:8000/health> → `{"status":"ok"}`
+
+### 3. Start the Next.js app (terminal 2)
+
+```bash
+npm install
+npm run dev
+```
+
+Open <http://localhost:3000>.
+
+### 4. Use it
+
+Paste any public GitHub URL into the **Analyze a repository** panel and click
+**Analyze**. The service fetches the real repository, runs the Architecture
+Agent, and the resulting Architecture Graph is compiled into a 3D world in the
+browser.
+
+Try:
+- `https://github.com/tiangolo/fastapi`
+- `https://github.com/expressjs/express`
+- `https://github.com/pallets/flask`
+
+Two fixtures are also wired up for offline use:
 
 - `http://localhost:3000` — RPA procedure-memory agent
 - `http://localhost:3000/?repo=shopfront` — e-commerce platform
 
 Both render through the **same** `WorldRenderer`. That is the core architectural proof.
+
+### Other commands
+
+```bash
+npm test                                        # 34 TypeScript tests
+npm run typecheck                               # strict mode
+python -m pytest services/architecture -q       # 55 Python tests
+```
+
+## How repository analysis works
+
+```
+Paste URL
+  → POST /api/analyze            (Next.js route — keeps service URL server-side)
+  → POST /projects/analyze-url   (FastAPI)
+  → repo_fetcher                 (GitHub API: metadata + tree + key files)
+  → Architecture Agent           (LangGraph + OpenRouter, validated + repair loop)
+  → Architecture Graph           (validated against the contract)
+  → buildWorld()                 (browser: compile + deterministic layout)
+  → 3D world
+```
+
+`repo_fetcher.py` selects the most architecture-revealing files (manifests,
+entrypoints, routes, services, infra) and skips vendored/binary paths. Context is
+capped so a large repository cannot exhaust the model window.
+
+The frontend never inspects repository source. It receives a validated
+Architecture Graph and treats it as data.
 
 ## Project structure
 

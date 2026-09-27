@@ -9,8 +9,20 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from pathlib import Path
 
+from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+
+# Load the repository-root .env so the service picks up OPENROUTER_API_KEY and
+# GITHUB_TOKEN without requiring the caller to export them manually.
+# Existing environment variables always win (load_dotenv does not override).
+for candidate in (
+    Path(__file__).resolve().parents[2] / ".env",
+    Path(__file__).resolve().parent / ".env",
+):
+    if candidate.is_file():
+        load_dotenv(candidate, override=False)
 
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_ARCHITECTURE_MODEL = "anthropic/claude-sonnet-4"

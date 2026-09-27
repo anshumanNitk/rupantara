@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -260,6 +261,23 @@ def _decode_content(payload: dict[str, Any]) -> str:
     return str(content)
 
 
+def _auth_headers() -> dict[str, str]:
+    """Builds GitHub request headers.
+
+    Public repositories work unauthenticated, but GitHub's limit is only 60
+    requests/hour. A token raises it to 5000/hour. The token is optional and is
+    never logged.
+    """
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "architecture-to-3d-world",
+    }
+    token = os.getenv("GITHUB_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 def fetch_repository(
     ref: RepoRef,
     client: httpx.Client | None = None,
@@ -268,10 +286,7 @@ def fetch_repository(
     owns_client = client is None
     client = client or httpx.Client(
         timeout=30.0,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "architecture-to-3d-world",
-        },
+        headers=_auth_headers(),
         follow_redirects=True,
     )
 
