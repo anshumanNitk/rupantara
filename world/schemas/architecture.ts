@@ -88,55 +88,68 @@ export const SpatialHintSchema = z.object({
 });
 export type SpatialHint = z.infer<typeof SpatialHintSchema>;
 
-export const ArchitectureGroupSchema = z.object({
-  id: z.string().min(1),
-  label: z.string().min(1),
-  diagram_region: DiagramRegionSchema,
-  description: z.string().optional(),
-});
+export const ArchitectureGroupSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    diagram_region: DiagramRegionSchema,
+    description: z.string().optional(),
+  })
+  .strict();
 export type ArchitectureGroup = z.infer<typeof ArchitectureGroupSchema>;
 
-export const ArchitectureNodeSchema = z.object({
-  id: z.string().min(1),
-  label: z.string().min(1),
-  type: NodeTypeSchema,
-  group: z.string().nullable(),
-  parent: z.string().nullable(),
-  metadata: z.record(z.unknown()).default({}),
-  spatial: SpatialHintSchema.optional(),
-  /** Provenance back to the repository. Preserved verbatim from the analyzer. */
-  source: z
-    .object({
-      file: z.string().optional(),
-      symbol: z.string().optional(),
-      line: z.number().int().nonnegative().optional(),
-    })
-    .optional(),
-});
+/**
+ * `.strict()` is deliberate: the Architecture Graph must never carry raw
+ * coordinates. If an LLM emits x/y/z, validation fails loudly instead of the
+ * values being silently stripped and the spatial intent being lost.
+ */
+export const ArchitectureNodeSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    type: NodeTypeSchema,
+    group: z.string().nullable(),
+    parent: z.string().nullable(),
+    metadata: z.record(z.unknown()).default({}),
+    spatial: SpatialHintSchema.optional(),
+    /** Provenance back to the repository. Preserved verbatim from the analyzer. */
+    source: z
+      .object({
+        file: z.string().optional(),
+        symbol: z.string().optional(),
+        line: z.number().int().nonnegative().optional(),
+      })
+      .optional(),
+  })
+  .strict();
 export type ArchitectureNode = z.infer<typeof ArchitectureNodeSchema>;
 
-export const ArchitectureEdgeSchema = z.object({
-  id: z.string().min(1),
-  source: z.string().min(1),
-  target: z.string().min(1),
-  type: EdgeTypeSchema,
-  label: z.string().optional(),
-  metadata: z.record(z.unknown()).default({}),
-});
+export const ArchitectureEdgeSchema = z
+  .object({
+    id: z.string().min(1),
+    source: z.string().min(1),
+    target: z.string().min(1),
+    type: EdgeTypeSchema,
+    label: z.string().optional(),
+    metadata: z.record(z.unknown()).default({}),
+  })
+  .strict();
 export type ArchitectureEdge = z.infer<typeof ArchitectureEdgeSchema>;
 
-export const ArchitectureGraphSchema = z.object({
-  schema_version: z.literal('1.0'),
-  repository: z.object({
-    name: z.string().min(1),
-    branch: z.string().optional(),
-    provider: z.string().optional(),
-    owner: z.string().optional(),
-  }),
-  groups: z.array(ArchitectureGroupSchema).default([]),
-  nodes: z.array(ArchitectureNodeSchema).min(1),
-  edges: z.array(ArchitectureEdgeSchema).default([]),
-});
+export const ArchitectureGraphSchema = z
+  .object({
+    schema_version: z.literal('1.0'),
+    repository: z.object({
+      name: z.string().min(1),
+      branch: z.string().optional(),
+      provider: z.string().optional(),
+      owner: z.string().optional(),
+    }),
+    groups: z.array(ArchitectureGroupSchema).default([]),
+    nodes: z.array(ArchitectureNodeSchema).min(1),
+    edges: z.array(ArchitectureEdgeSchema).default([]),
+  })
+  .strict();
 export type ArchitectureGraph = z.infer<typeof ArchitectureGraphSchema>;
 
 /**

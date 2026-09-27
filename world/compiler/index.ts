@@ -1,3 +1,4 @@
+import type { z } from 'zod';
 import type { ArchitectureGraph } from '../schemas/architecture';
 import type { WorldSpecification, PlacedWorld } from '../schemas/world';
 import { validateOrThrow } from '../schemas/validate';
@@ -17,22 +18,24 @@ import { validatePlacedWorld } from './validator';
  */
 
 export interface PipelineResult {
+  /** The validated Architecture Graph, with defaults applied. */
+  architecture: ArchitectureGraph;
   world: WorldSpecification;
   placed: PlacedWorld;
 }
 
 export function buildWorld(
-  graphInput: unknown,
+  graphInput: z.input<typeof ArchitectureGraphSchema>,
   options: CompileOptions = {},
 ): PipelineResult {
-  const graph = validateOrThrow(
+  const architecture = validateOrThrow(
     ArchitectureGraphSchema,
     graphInput,
     validateArchitectureGraph,
     'Architecture Graph',
   );
 
-  const world = compileWorld(graph, options);
+  const world = compileWorld(architecture, options);
 
   const worldErrors = validateWorldSpecification(world);
   if (worldErrors.length > 0) {
@@ -46,7 +49,7 @@ export function buildWorld(
     throw new Error(`Layout produced an invalid placed world:\n  - ${placedErrors.join('\n  - ')}`);
   }
 
-  return { world, placed };
+  return { architecture, world, placed };
 }
 
 export { compileWorld, layoutWorld };

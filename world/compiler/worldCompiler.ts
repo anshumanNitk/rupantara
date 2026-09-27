@@ -1,6 +1,9 @@
+import type { z } from 'zod';
 import type { ArchitectureGraph, ArchitectureNode } from '../schemas/architecture';
+import { ArchitectureGraphSchema, validateArchitectureGraph } from '../schemas/architecture';
 import type { WorldSpecification, WorldEntity, WorldConnection, WorldZone } from '../schemas/world';
 import { resolveEntityMapping, resolveConnectionMapping } from '../registries/semanticRegistry';
+import { validateOrThrow } from '../schemas/validate';
 
 /**
  * World Compiler — Architecture Graph -> World Specification.
@@ -105,15 +108,29 @@ function compileConnection(
   };
 }
 
+/**
+ * Compiles an Architecture Graph into a World Specification.
+ *
+ * Accepts raw input and validates it first, so callers can pass AI output
+ * directly. Malformed graphs are rejected here rather than producing a
+ * half-built world.
+ */
 export function compileWorld(
-  graph: ArchitectureGraph,
+  graphInput: z.input<typeof ArchitectureGraphSchema>,
   options: CompileOptions = {},
 ): WorldSpecification {
+  const graph = validateOrThrow(
+    ArchitectureGraphSchema,
+    graphInput,
+    validateArchitectureGraph,
+    'Architecture Graph',
+  );
+
   const seed =
     options.seed ??
     deriveSeed(`${graph.repository.name}:${graph.repository.branch ?? 'main'}`);
 
-  const worldId = options.worldId ?? slugify(graph.repository.name) || 'world';
+  const worldId = options.worldId ?? (slugify(graph.repository.name) || 'world');
   const worldName = options.worldName ?? graph.repository.name;
 
   return {

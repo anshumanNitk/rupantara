@@ -1,0 +1,151 @@
+import type { z } from 'zod';
+import { ArchitectureGraphSchema } from '@/world/schemas/architecture';
+
+/**
+ * Fixture: e-commerce platform.
+ *
+ * A completely unrelated repository. It shares NO node ids, NO groups and NO
+ * technologies with the RPA fixture. Rendering it must produce a different city
+ * without changing a single line of the visualization frontend — this is the
+ * second architectural proof.
+ */
+export const ECOMMERCE_ARCHITECTURE: z.input<typeof ArchitectureGraphSchema> = {
+  schema_version: '1.0',
+  repository: {
+    name: 'shopfront',
+    branch: 'main',
+    provider: 'github',
+    owner: 'example',
+  },
+  groups: [
+    { id: 'clients', label: 'Clients', diagram_region: 'west' },
+    { id: 'edge', label: 'Edge / Gateway', diagram_region: 'center' },
+    { id: 'services', label: 'Domain Services', diagram_region: 'east' },
+    { id: 'data', label: 'Data Stores', diagram_region: 'south' },
+    { id: 'partners', label: 'External Partners', diagram_region: 'far_north' },
+  ],
+  nodes: [
+    {
+      id: 'web_storefront',
+      label: 'Web Storefront',
+      type: 'frontend',
+      group: 'clients',
+      parent: null,
+      metadata: { framework: 'Next.js' },
+      source: { file: 'apps/storefront/pages/index.tsx' },
+    },
+    {
+      id: 'mobile_app',
+      label: 'Mobile App',
+      type: 'frontend',
+      group: 'clients',
+      parent: null,
+      metadata: { framework: 'React Native' },
+      source: { file: 'apps/mobile/App.tsx' },
+    },
+    {
+      id: 'api_gateway',
+      label: 'API Gateway',
+      type: 'gateway',
+      group: 'edge',
+      parent: null,
+      metadata: { technology: 'Kong' },
+      source: { file: 'services/gateway/main.go' },
+    },
+    {
+      id: 'auth_service',
+      label: 'Auth Service',
+      type: 'service',
+      group: 'edge',
+      parent: 'api_gateway',
+      metadata: { protocol: 'OIDC' },
+      source: { file: 'services/auth/index.ts' },
+    },
+    {
+      id: 'catalog_service',
+      label: 'Catalog Service',
+      type: 'backend',
+      group: 'services',
+      parent: null,
+      metadata: { language: 'Go' },
+      source: { file: 'services/catalog/main.go' },
+    },
+    {
+      id: 'order_service',
+      label: 'Order Service',
+      type: 'backend',
+      group: 'services',
+      parent: null,
+      metadata: { language: 'Go' },
+      source: { file: 'services/orders/main.go' },
+    },
+    {
+      id: 'payment_worker',
+      label: 'Payment Worker',
+      type: 'compute',
+      group: 'services',
+      parent: 'order_service',
+      metadata: { runtime: 'worker' },
+      source: { file: 'services/orders/worker.go' },
+    },
+    {
+      id: 'order_events',
+      label: 'Order Events',
+      type: 'queue',
+      group: 'services',
+      parent: null,
+      metadata: { technology: 'Kafka' },
+      source: { file: 'infra/kafka/orders.tf' },
+    },
+    {
+      id: 'postgres',
+      label: 'Postgres',
+      type: 'database',
+      group: 'data',
+      parent: null,
+      metadata: { technology: 'Postgres' },
+      source: { file: 'infra/db/postgres.tf' },
+    },
+    {
+      id: 'product_images',
+      label: 'Product Images',
+      type: 'object_storage',
+      group: 'data',
+      parent: null,
+      metadata: { technology: 'S3' },
+      source: { file: 'infra/storage/images.tf' },
+    },
+    {
+      id: 'payment_provider',
+      label: 'Payment Provider',
+      type: 'external_service',
+      group: 'partners',
+      parent: null,
+      metadata: { kind: 'payments' },
+      source: { file: 'services/orders/payments.go' },
+    },
+    {
+      id: 'shipping_provider',
+      label: 'Shipping Provider',
+      type: 'external_service',
+      group: 'partners',
+      parent: null,
+      metadata: { kind: 'logistics' },
+      source: { file: 'services/orders/shipping.go' },
+    },
+  ],
+  edges: [
+    { id: 'e1', source: 'web_storefront', target: 'api_gateway', type: 'api_call', label: 'HTTPS' },
+    { id: 'e2', source: 'mobile_app', target: 'api_gateway', type: 'api_call', label: 'HTTPS' },
+    { id: 'e3', source: 'api_gateway', target: 'auth_service', type: 'dependency', label: 'verifies' },
+    { id: 'e4', source: 'api_gateway', target: 'catalog_service', type: 'api_call', label: 'routes' },
+    { id: 'e5', source: 'api_gateway', target: 'order_service', type: 'api_call', label: 'routes' },
+    { id: 'e6', source: 'catalog_service', target: 'postgres', type: 'data_flow', label: 'reads' },
+    { id: 'e7', source: 'catalog_service', target: 'product_images', type: 'data_flow', label: 'serves' },
+    { id: 'e8', source: 'order_service', target: 'postgres', type: 'data_flow', label: 'writes' },
+    { id: 'e9', source: 'order_service', target: 'order_events', type: 'event', label: 'publishes' },
+    { id: 'e10', source: 'order_events', target: 'payment_worker', type: 'event', label: 'consumes' },
+    { id: 'e11', source: 'payment_worker', target: 'payment_provider', type: 'api_call', label: 'charges' },
+    { id: 'e12', source: 'payment_worker', target: 'shipping_provider', type: 'api_call', label: 'books' },
+  ],
+};

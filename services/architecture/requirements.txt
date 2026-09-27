@@ -1,0 +1,19 @@
+# Architecture Intelligence service
+#
+# Hosts the Architecture Agent (repository -> Architecture Graph) and the
+# Scene Agent (Placed World + Scene SDK -> Scene Program) using LangGraph,
+# with OpenRouter as the model provider.
+#
+# This service is deliberately separate from the Next.js app: the visualization
+# runtime must never contain repository-analysis logic.
+
+fastapi==0.115.0
+uvicorn[standard]==0.31.1
+pydantic==2.9.2
+httpx==0.27.2
+
+langgraph==0.2.34
+langchain-core==0.3.10
+langchain-openai==0.2.2
+
+python-dotenv==1.0.1

@@ -9,9 +9,12 @@ export interface ValidationResult<T> {
 /**
  * Validates unknown input against a zod schema and then runs optional
  * structural checks. Malformed AI output is rejected here, never downstream.
+ *
+ * The schema parameter accepts `unknown` input so schemas using `.default()`
+ * (where input and output types differ) can be passed directly.
  */
 export function validate<T>(
-  schema: z.ZodType<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   input: unknown,
   structural?: (value: T) => string[],
 ): ValidationResult<T> {
@@ -34,7 +37,7 @@ export function validate<T>(
 
 /** Throwing variant for use inside compilers where invalid input is a bug. */
 export function validateOrThrow<T>(
-  schema: z.ZodType<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   input: unknown,
   structural?: (value: T) => string[],
   label = 'input',
