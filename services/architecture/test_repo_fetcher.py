@@ -1,4 +1,4 @@
-"""Tests for repository URL parsing and file selection.
+"""Tests for repository URL parsing and file selection. 
 
 These guard the entry point of the whole pipeline: a malformed URL or a bad
 file-selection heuristic would silently degrade every downstream stage.
