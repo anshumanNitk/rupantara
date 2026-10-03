@@ -4,7 +4,9 @@ import type { Npc } from '../schemas/npc';
 import type { Interaction } from '../schemas/interaction';
 import type { Quest, Objective } from '../schemas/quest';
 import type { DialogueTree } from '../schemas/dialogue';
-import type { GameProvenance } from '../schemas/common';
+import type { GameProvenance, TileCoord } from '../schemas/common';
+import type { TileMap } from '../schemas/tilemap';
+import { isWalkable, inBounds } from '../schemas/tilemap';
 import { resolveLandmarkRole, resolveNpcRole, NPC_NODE_TYPES } from '../registries/semanticWorldRegistry';
 import { spriteForRole } from '../registries/spriteRegistry';
 import type { LandmarkPlacement } from './mapCompiler';
@@ -24,6 +26,64 @@ export interface QuestCompileResult {
   quests: Quest[];
   dialogues: DialogueTree[];
   guideNpcId: string | null;
+}
+
+const TILE_KEY = (x: number, y: number): string => `${x},${y}`;
+
+/**
+ * Finds the closest walkable tile to `preferred` that is not occupied and is at
+ * least `minEntranceDistance` tiles (manhattan) from every landmark entrance.
+ *
+ * This is what stops an NPC from standing on a landmark's entrance and
+ * overshadowing it: NPCs are pushed to a nearby free tile instead.
+ */
+function findFreeNpcTile(
+  map: TileMap,
+  preferred: TileCoord,
+  occupied: Set<string>,
+  entrances: TileCoord[],
+  minEntranceDistance: number,
+): TileCoord {
+  const neighbours: ReadonlyArray<readonly [number, number]> = [
+    [0, 1],
+    [1, 0],
+    [-1, 0],
+    [0, -1],
+    [1, 1],
+    [-1, 1],
+    [1, -1],
+    [-1, -1],
+  ];
+
+  const visited = new Set<string>([TILE_KEY(preferred.x, preferred.y)]);
+  const queue: TileCoord[] = [preferred];
+
+  const isFree = (tile: TileCoord): boolean => {
+    if (!isWalkable(map, tile.x, tile.y)) return false;
+    if (occupied.has(TILE_KEY(tile.x, tile.y))) return false;
+    for (const entrance of entrances) {
+      const distance = Math.abs(entrance.x - tile.x) + Math.abs(entrance.y - tile.y);
+      if (distance < minEntranceDistance) return false;
+    }
+    return true;
+  };
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (isFree(current)) return current;
+
+    for (const [dx, dy] of neighbours) {
+      const nx = current.x + dx;
+      const ny = current.y + dy;
+      if (!inBounds(map, nx, ny)) continue;
+      const key = TILE_KEY(nx, ny);
+      if (visited.has(key)) continue;
+      visited.add(key);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+
+  return preferred;
 }
 
 function provenanceFor(entityId: string, placed: PlacedWorld): GameProvenance {
@@ -76,6 +136,7 @@ export function topologicalOrder(placed: PlacedWorld): string[] {
 export function compileQuests(
   placed: PlacedWorld,
   placements: LandmarkPlacement[],
+  map: TileMap,
 ): QuestCompileResult {
   const placementByEntity = new Map(placements.map((p) => [p.entityId, p]));
 
@@ -127,16 +188,26 @@ export function compileQuests(
   const npcs: Npc[] = [];
   const dialogues: DialogueTree[] = [];
 
+  // NPCs must never stand on a landmark entrance, or they would overshadow the
+  // landmark and make it impossible to inspect. Track occupied tiles and keep
+  // NPCs at least 2 tiles from every entrance.
+  const entrances = landmarks.map((l) => l.entrance);
+  const occupied = new Set<string>();
+  const MIN_ENTRANCE_DISTANCE = 2;
+
   if (guideEntityId !== null) {
     const placement = placementByEntity.get(guideEntityId);
     const guideId = 'npc_guide';
     const dialogueId = `dialogue_${guideId}`;
+    const preferred = placement?.entrance ?? { x: 0, y: 0 };
+    const position = findFreeNpcTile(map, preferred, occupied, entrances, MIN_ENTRANCE_DISTANCE);
+    occupied.add(TILE_KEY(position.x, position.y));
 
     npcs.push({
       id: guideId,
       label: 'The Guide',
       role: 'guide',
-      position: placement?.entrance ?? { x: 0, y: 0 },
+      position,
       facing: 'south',
       sprite: spriteForRole('guide').id,
       dialogue_id: dialogueId,
@@ -180,12 +251,14 @@ export function compileQuests(
     const npcId = `npc_${entity.id}`;
     const dialogueId = `dialogue_${npcId}`;
     const role = resolveNpcRole(entity.semantic_type);
+    const position = findFreeNpcTile(map, placement.entrance, occupied, entrances, MIN_ENTRANCE_DISTANCE);
+    occupied.add(TILE_KEY(position.x, position.y));
 
     npcs.push({
       id: npcId,
       label: entity.id,
       role,
-      position: placement.entrance,
+      position,
       facing: 'south',
       sprite: spriteForRole(role).id,
       dialogue_id: dialogueId,

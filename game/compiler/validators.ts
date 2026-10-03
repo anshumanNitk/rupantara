@@ -141,6 +141,26 @@ function validatePlacement(pack: GamePack): string[] {
     errors.push(`Spawn (${pack.spawn.position.x},${pack.spawn.position.y}) is not walkable`);
   }
 
+  // No two interactable objects may share a tile, or one would overshadow the
+  // other and become impossible to interact with.
+  const occupants = new Map<string, string>();
+  const claim = (key: string, owner: string): void => {
+    const existing = occupants.get(key);
+    if (existing !== undefined) {
+      errors.push(`Objects "${existing}" and "${owner}" share tile (${key})`);
+    } else {
+      occupants.set(key, owner);
+    }
+  };
+
+  for (const landmark of pack.landmarks) {
+    claim(`${landmark.entrance.x},${landmark.entrance.y}`, `landmark:${landmark.id}`);
+  }
+  for (const npc of pack.npcs) {
+    claim(`${npc.position.x},${npc.position.y}`, `npc:${npc.id}`);
+  }
+  claim(`${pack.spawn.position.x},${pack.spawn.position.y}`, 'spawn');
+
   return errors;
 }
 

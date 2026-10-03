@@ -5,6 +5,7 @@ import { ECOMMERCE_ARCHITECTURE } from '@/fixtures/ecommerceArchitecture';
 import { compileGamePack, fingerprintWorld } from '@/game/compiler/gameCompiler';
 import { validateGamePack, floodFill } from '@/game/compiler/validators';
 import { isWalkable } from '@/game/schemas/tilemap';
+import { findNearbyInteractable } from '@/components/rpg/interactionSystem';
 
 function rpaPack() {
   const { placed } = buildWorld(RPA_ARCHITECTURE);
@@ -67,6 +68,41 @@ describe('Game Compiler', () => {
       Math.abs(guide!.position.x - pack.spawn.position.x) +
       Math.abs(guide!.position.y - pack.spawn.position.y);
     expect(distance).toBeLessThanOrEqual(2);
+  });
+
+  it('never places an NPC on a landmark entrance', () => {
+    const pack = rpaPack();
+    const entrances = new Set(pack.landmarks.map((l) => `${l.entrance.x},${l.entrance.y}`));
+    for (const npc of pack.npcs) {
+      expect(entrances.has(`${npc.position.x},${npc.position.y}`)).toBe(false);
+    }
+  });
+
+  it('never places two NPCs on the same tile', () => {
+    const pack = rpaPack();
+    const seen = new Set<string>();
+    for (const npc of pack.npcs) {
+      const key = `${npc.position.x},${npc.position.y}`;
+      expect(seen.has(key)).toBe(false);
+      seen.add(key);
+    }
+  });
+
+  it('keeps the guide off the hub landmark entrance so it stays inspectable', () => {
+    const pack = rpaPack();
+    const guide = pack.npcs.find((n) => n.role === 'guide')!;
+    const hub = pack.landmarks.find((l) => l.architecture_entity_id === guide.architecture_entity_id)!;
+    const sameTile = guide.position.x === hub.entrance.x && guide.position.y === hub.entrance.y;
+    expect(sameTile).toBe(false);
+  });
+
+  it('resolves the hub landmark (not the guide) when standing on its entrance', () => {
+    const pack = rpaPack();
+    const guide = pack.npcs.find((n) => n.role === 'guide')!;
+    const hub = pack.landmarks.find((l) => l.architecture_entity_id === guide.architecture_entity_id)!;
+    const nearby = findNearbyInteractable(pack, hub.entrance, 2);
+    expect(nearby?.kind).toBe('landmark');
+    expect(nearby?.id).toBe(hub.id);
   });
 
   it('reaches every landmark entrance and NPC from spawn', () => {

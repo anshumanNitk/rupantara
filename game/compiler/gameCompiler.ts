@@ -52,9 +52,13 @@ export function fingerprintWorld(placed: PlacedWorld): string {
 function chooseSpawn(
   map: ReturnType<typeof compileMap>['map'],
   guideEntrance: { x: number; y: number } | null,
+  occupied: Set<string>,
 ): { x: number; y: number } {
+  const free = (x: number, y: number): boolean =>
+    isWalkable(map, x, y) && !occupied.has(`${x},${y}`);
+
   // Prefer a walkable tile adjacent to the guide so the player starts near the
-  // guide without standing on the same tile.
+  // guide without standing on the same tile or on a landmark entrance.
   if (guideEntrance) {
     const neighbours: Array<[number, number]> = [
       [0, 1],
@@ -65,20 +69,20 @@ function chooseSpawn(
     for (const [dx, dy] of neighbours) {
       const x = guideEntrance.x + dx;
       const y = guideEntrance.y + dy;
-      if (isWalkable(map, x, y)) return { x, y };
+      if (free(x, y)) return { x, y };
     }
-    if (isWalkable(map, guideEntrance.x, guideEntrance.y)) return guideEntrance;
+    if (free(guideEntrance.x, guideEntrance.y)) return guideEntrance;
   }
 
   const centerX = Math.floor(map.width / 2);
   const centerY = Math.floor(map.height / 2);
   const near = nearestWalkable(map, centerX, centerY);
-  if (near) return near;
+  if (near && free(near.x, near.y)) return near;
 
-  // Last resort: first walkable tile in row-major order.
+  // Last resort: first free walkable tile in row-major order.
   for (let y = 0; y < map.height; y += 1) {
     for (let x = 0; x < map.width; x += 1) {
-      if (isWalkable(map, x, y)) return { x, y };
+      if (free(x, y)) return { x, y };
     }
   }
   return { x: 0, y: 0 };
@@ -95,10 +99,15 @@ export function compileGamePack(
   const { landmarks, npcs, interactions, quests, dialogues, guideNpcId } = compileQuests(
     placed,
     placements,
+    map,
   );
 
   const guide = guideNpcId ? npcs.find((n) => n.id === guideNpcId) ?? null : null;
-  const spawnPosition = chooseSpawn(map, guide?.position ?? null);
+  const occupied = new Set<string>([
+    ...npcs.map((n) => `${n.position.x},${n.position.y}`),
+    ...landmarks.map((l) => `${l.entrance.x},${l.entrance.y}`),
+  ]);
+  const spawnPosition = chooseSpawn(map, guide?.position ?? null, occupied);
 
   const pack: GamePack = {
     schema_version: '1.0',

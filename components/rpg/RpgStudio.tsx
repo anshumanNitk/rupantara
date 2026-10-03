@@ -119,7 +119,7 @@ function RpgStudioInner({
     [pack, state.player.position, tokens.interactRadius],
   );
 
-  const dialogueOpen = state.dialogue.npc_id !== null;
+  const dialogueOpen = state.dialogue.npc_id !== null && state.dialogue.node_id !== null;
 
   const handleMove = useCallback(
     (position: { x: number; y: number }, facing: 'north' | 'south' | 'east' | 'west') => {

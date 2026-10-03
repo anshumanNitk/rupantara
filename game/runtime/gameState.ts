@@ -168,6 +168,12 @@ export function reduceGameState(pack: GamePack, state: GameState, action: GameAc
         next = { ...next, unlocks: unique([...next.unlocks, choice.quest_id ?? '']) };
       }
 
+      // A choice with no next node ends the conversation. Close it fully so the
+      // world is not left frozen with a dangling npc_id and no node.
+      if (choice.next === null) {
+        return { ...next, dialogue: { npc_id: null, node_id: null } };
+      }
+
       return { ...next, dialogue: { npc_id, node_id: choice.next } };
     }
 

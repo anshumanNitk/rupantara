@@ -90,6 +90,24 @@ describe('Game Runtime', () => {
     expect(closed.dialogue.npc_id).toBeNull();
   });
 
+  it('fully closes dialogue when a choice has no next node', () => {
+    const { pack, state } = setup();
+    const opened = reduceGameState(pack, state, { type: 'talk', npcId: 'npc_guide' });
+    // "Not yet." has next: null and must end the conversation, not leave a
+    // dangling npc_id that freezes the world.
+    const ended = reduceGameState(pack, opened, { type: 'dialogue_choice', choiceId: 'later' });
+    expect(ended.dialogue.npc_id).toBeNull();
+    expect(ended.dialogue.node_id).toBeNull();
+  });
+
+  it('does not leave the world frozen after ending a conversation', () => {
+    const { pack, state } = setup();
+    const opened = reduceGameState(pack, state, { type: 'talk', npcId: 'npc_guide' });
+    const ended = reduceGameState(pack, opened, { type: 'dialogue_choice', choiceId: 'later' });
+    const dialogueOpen = ended.dialogue.npc_id !== null && ended.dialogue.node_id !== null;
+    expect(dialogueOpen).toBe(false);
+  });
+
   it('resets to the initial state', () => {
     const { pack, state } = setup();
     const progressed = reduceGameState(pack, state, { type: 'talk', npcId: 'npc_guide' });
