@@ -32,7 +32,7 @@ export function DialoguePanel({ pack, state, onChoice, onClose }: DialoguePanelP
     <div
       style={{
         position: 'absolute',
-        bottom: 24,
+        bottom: 120,
         left: '50%',
         transform: 'translateX(-50%)',
         zIndex: 40,

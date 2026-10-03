@@ -43,7 +43,19 @@ export function GameHud({
   return (
     <>
       {/* Title / world identity */}
-      <div style={{ position: 'absolute', top: 16, left: 16, zIndex: 20, ...panelStyle(accent), padding: '10px 14px', maxWidth: 300 }}>
+      <div
+        style={{
+          position: 'absolute',
+          top: 16,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 20,
+          ...panelStyle(accent),
+          padding: '10px 18px',
+          textAlign: 'center',
+          maxWidth: 360,
+        }}
+      >
         <div style={{ fontSize: 15, fontWeight: 700, color: accent }}>{pack.theme.label}</div>
         <div style={{ fontSize: 11, color: '#9aa7b8', marginTop: 2 }}>{pack.world.name}</div>
         {pack.theme.tagline && (
@@ -92,7 +104,7 @@ export function GameHud({
       )}
 
       {/* Controls hint + developer toggle */}
-      <div style={{ position: 'absolute', bottom: 16, left: 16, zIndex: 20, ...panelStyle(accent), padding: '8px 12px', fontSize: 11, color: '#9aa7b8' }}>
+      <div style={{ position: 'absolute', bottom: 16, right: 16, zIndex: 20, ...panelStyle(accent), padding: '8px 12px', fontSize: 11, color: '#9aa7b8' }}>
         <div>Move: WASD / Arrows · Interact: E</div>
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
           <button type="button" style={buttonStyle(accent)} onClick={onOpenDeveloper}>Developer</button>

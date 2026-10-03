@@ -37,6 +37,9 @@ export function RepoInput({
   const [error, setError] = useState<string | null>(null);
   const [retryable, setRetryable] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
+  // Collapsed by default so the game world is the focus; the panel expands to
+  // analyze a new repository.
+  const [collapsed, setCollapsed] = useState(true);
 
   const handleAnalyze = useCallback(async () => {
     const trimmed = url.trim();
@@ -84,7 +87,7 @@ export function RepoInput({
     <div
       style={{
         position: 'absolute',
-        top: 16,
+        bottom: 16,
         left: 16,
         zIndex: 30,
         width: 340,
@@ -96,12 +99,38 @@ export function RepoInput({
         fontSize: 13,
       }}
     >
-      <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>Analyze a repository</div>
-      <div style={{ color: '#8b98ad', fontSize: 11, marginBottom: 10 }}>
-        Paste a public GitHub link to generate its 3D world
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>Analyze a repository</div>
+          <div style={{ color: '#8b98ad', fontSize: 11, marginBottom: 10 }}>
+            Paste a public GitHub link to generate its world
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setCollapsed((value) => !value)}
+          aria-label={collapsed ? 'Expand repository panel' : 'Collapse repository panel'}
+          style={{
+            padding: '2px 8px',
+            borderRadius: 6,
+            border: '1px solid #2b3445',
+            background: 'transparent',
+            color: '#8b98ad',
+            cursor: 'pointer',
+            fontSize: 12,
+          }}
+        >
+          {collapsed ? '▸' : '▾'}
+        </button>
       </div>
 
-      <input
+      {collapsed ? (
+        <div style={{ color: '#8b98ad', fontSize: 11 }}>
+          Showing: <span style={{ color: '#9fd0ff' }}>{currentRepoLabel}</span>
+        </div>
+      ) : (
+        <>
+          <input
         type="text"
         value={url}
         onChange={(event) => setUrl(event.target.value)}
@@ -258,6 +287,8 @@ export function RepoInput({
             </button>
           ))}
         </div>
+      )}
+        </>
       )}
     </div>
   );
