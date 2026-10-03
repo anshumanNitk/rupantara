@@ -53,8 +53,21 @@ function chooseSpawn(
   map: ReturnType<typeof compileMap>['map'],
   guideEntrance: { x: number; y: number } | null,
 ): { x: number; y: number } {
-  if (guideEntrance && isWalkable(map, guideEntrance.x, guideEntrance.y)) {
-    return guideEntrance;
+  // Prefer a walkable tile adjacent to the guide so the player starts near the
+  // guide without standing on the same tile.
+  if (guideEntrance) {
+    const neighbours: Array<[number, number]> = [
+      [0, 1],
+      [1, 0],
+      [-1, 0],
+      [0, -1],
+    ];
+    for (const [dx, dy] of neighbours) {
+      const x = guideEntrance.x + dx;
+      const y = guideEntrance.y + dy;
+      if (isWalkable(map, x, y)) return { x, y };
+    }
+    if (isWalkable(map, guideEntrance.x, guideEntrance.y)) return guideEntrance;
   }
 
   const centerX = Math.floor(map.width / 2);

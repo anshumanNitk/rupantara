@@ -56,6 +56,19 @@ describe('Game Compiler', () => {
     expect(isWalkable(pack.map, pack.spawn.position.x, pack.spawn.position.y)).toBe(true);
   });
 
+  it('spawns near the guide but not on the same tile', () => {
+    const pack = rpaPack();
+    const guide = pack.npcs.find((n) => n.role === 'guide');
+    expect(guide).toBeDefined();
+    const sameTile =
+      guide!.position.x === pack.spawn.position.x && guide!.position.y === pack.spawn.position.y;
+    expect(sameTile).toBe(false);
+    const distance =
+      Math.abs(guide!.position.x - pack.spawn.position.x) +
+      Math.abs(guide!.position.y - pack.spawn.position.y);
+    expect(distance).toBeLessThanOrEqual(2);
+  });
+
   it('reaches every landmark entrance and NPC from spawn', () => {
     const pack = rpaPack();
     const reachable = floodFill(pack.map, pack.spawn.position.x, pack.spawn.position.y);
