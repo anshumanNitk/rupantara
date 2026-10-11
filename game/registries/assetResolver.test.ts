@@ -3,7 +3,16 @@ import { buildWorld } from '@/world/compiler';
 import { RPA_ARCHITECTURE } from '@/fixtures/rpaArchitecture';
 import { compileGamePack } from '@/game/compiler/gameCompiler';
 import { findNearbyInteractable } from '@/components/rpg/interactionSystem';
-import { resolveGameAsset, DEFAULT_ASSET_MANIFEST } from '@/game/registries/assetResolver';
+import {
+  resolveGameAsset,
+  DEFAULT_ASSET_MANIFEST,
+  createDefaultResolver,
+  GeneratorProvider,
+  CatalogProvider,
+  ProceduralProvider,
+  PlaceholderProvider,
+  scoreEntry,
+} from '@/game/registries/assetResolver';
 
 function pack() {
   return compileGamePack(buildWorld(RPA_ARCHITECTURE).placed);
@@ -42,41 +51,41 @@ describe('Interaction system', () => {
   });
 });
 
-describe('Layered asset resolver', () => {
-  it('resolves a procedural asset without any external dependency', () => {
-    const resolution = resolveGameAsset('landmark.guild_hall', 'guild_hall');
+describe('Layered asset resolver (backwards-compatible)', () => {
+  it('resolves a procedural asset without any external dependency', async () => {
+    const resolution = await resolveGameAsset('landmark.guild_hall', 'guild_hall');
     expect(resolution.kind).toBe('procedural');
   });
 
-  it('resolves a local sprite sheet', () => {
-    const resolution = resolveGameAsset('sprites.arcane', 'guild_hall');
+  it('resolves a local sprite sheet', async () => {
+    const resolution = await resolveGameAsset('sprites.arcane', 'guild_hall');
     expect(resolution.kind).toBe('sprite_sheet');
     if (resolution.kind === 'sprite_sheet') {
       expect(resolution.source).toBe('local');
     }
   });
 
-  it('resolves an external asset when allowed', () => {
-    const resolution = resolveGameAsset('landmark.tower.external', 'tower');
+  it('resolves an external asset when allowed', async () => {
+    const resolution = await resolveGameAsset('landmark.tower.external', 'tower');
     expect(resolution.kind).toBe('glb');
     if (resolution.kind === 'glb') {
       expect(resolution.source).toBe('external');
     }
   });
 
-  it('falls back to procedural when external assets are disabled', () => {
-    const resolution = resolveGameAsset('landmark.tower.external', 'tower', { allowExternal: false });
+  it('falls back to procedural when external assets are disabled', async () => {
+    const resolution = await resolveGameAsset('landmark.tower.external', 'tower', { allowExternal: false });
     expect(resolution.kind).toBe('procedural');
   });
 
-  it('falls back to procedural for unknown ids and never throws', () => {
-    const resolution = resolveGameAsset('does.not.exist', 'fallback_primitive');
-    expect(resolution).toEqual({ kind: 'procedural', primitive: 'fallback_primitive' });
+  it('falls back to procedural for unknown ids and never throws', async () => {
+    const resolution = await resolveGameAsset('does.not.exist', 'fallback_primitive');
+    expect(resolution.kind).toBe('procedural');
   });
 
-  it('falls back to procedural for a null asset id', () => {
-    const resolution = resolveGameAsset(null, 'fallback_primitive');
-    expect(resolution).toEqual({ kind: 'procedural', primitive: 'fallback_primitive' });
+  it('falls back to procedural for a null asset id', async () => {
+    const resolution = await resolveGameAsset(null, 'fallback_primitive');
+    expect(resolution.kind).toBe('procedural');
   });
 
   it('exposes a manifest with local and external entries', () => {
@@ -84,5 +93,77 @@ describe('Layered asset resolver', () => {
     expect(sources.has('procedural')).toBe(true);
     expect(sources.has('local')).toBe(true);
     expect(sources.has('external')).toBe(true);
+  });
+});
+
+describe('Provider-chain resolver', () => {
+  it('scores an exact match as 1 and a miss as 0', () => {
+    expect(scoreEntry({ ref: 'guild hall' }, { id: 'guild_hall', type: 'glb', url: 'x' })).toBe(1);
+    expect(scoreEntry({ ref: 'guild hall' }, { id: 'banana', type: 'glb', url: 'x' })).toBe(0);
+  });
+
+  it('tags every resolution with provenance', async () => {
+    const resolver = createDefaultResolver();
+    const result = await resolver.resolve({ primitive: 'guild_hall' });
+    expect(result.by).toBe('procedural');
+    expect(resolver.assetReport().length).toBe(1);
+  });
+
+  it('caches identical requests', async () => {
+    let calls = 0;
+    const generator = new GeneratorProvider('gen', async () => {
+      calls += 1;
+      return { kind: 'generated', uri: '/gen/a.png', assetId: 'a', prompt: 'a' };
+    });
+    const resolver = createDefaultResolver({ generator });
+    await resolver.resolve({ ref: 'unique thing' });
+    await resolver.resolve({ ref: 'unique thing' });
+    expect(calls).toBe(1);
+  });
+
+  it('falls through to the generator when nothing else matches', async () => {
+    const generator = new GeneratorProvider('gen', async (req) => ({
+      kind: 'generated',
+      uri: `/gen/${req.ref}.png`,
+      assetId: String(req.ref),
+      prompt: String(req.ref),
+    }));
+    const resolver = createDefaultResolver({ generator });
+    const result = await resolver.resolve({ ref: 'a very distinctive landmark' });
+    expect(result.kind).toBe('generated');
+    expect(result.by).toBe('gen');
+  });
+
+  it('never throws and always returns a result', async () => {
+    const failing = new GeneratorProvider('boom', async () => {
+      throw new Error('provider exploded');
+    });
+    const resolver = createDefaultResolver({ generator: failing });
+    const result = await resolver.resolve({ ref: 'a very distinctive landmark' });
+    expect(result).toBeTruthy();
+    // The failing generator is skipped; the placeholder is the guaranteed end.
+    expect(result.kind).toBe('placeholder');
+  });
+
+  it('prefers a curated catalog entry over fuzzy procedural', async () => {
+    const resolver = createDefaultResolver({
+      manifest: [{ id: 'guild_hall', type: 'glb', url: '/curated.glb' }],
+    });
+    const result = await resolver.resolve({ ref: 'guild hall' });
+    expect(result.kind).toBe('glb');
+    expect(result.by).toBe('manifest');
+  });
+
+  it('exposes the individual providers for composition', () => {
+    expect(new ProceduralProvider().name).toBe('procedural');
+    expect(new ProceduralProvider(true).name).toBe('procedural-fuzzy');
+    expect(new PlaceholderProvider().name).toBe('placeholder');
+    expect(new CatalogProvider('x', []).name).toBe('x');
+  });
+
+  it('placeholder is the guaranteed final link', async () => {
+    const resolver = createDefaultResolver();
+    const result = await resolver.resolve({});
+    expect(result.kind).toBe('placeholder');
   });
 });

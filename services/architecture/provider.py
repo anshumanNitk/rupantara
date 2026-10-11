@@ -27,6 +27,10 @@ for candidate in (
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_ARCHITECTURE_MODEL = "anthropic/claude-sonnet-4"
 DEFAULT_SCENE_MODEL = "anthropic/claude-sonnet-4"
+# Narrative writing is high-volume, latency-sensitive and creative rather than
+# structural, so it uses a fast model. The story is validated against the
+# architecture graph afterwards, so a cheaper model cannot corrupt the world.
+DEFAULT_NARRATIVE_MODEL = "anthropic/claude-haiku-5.5"
 
 
 class MissingApiKeyError(RuntimeError):
@@ -63,6 +67,8 @@ def get_model(role: str = "architecture", temperature: float = 0.0) -> ChatOpenA
     """
     if role == "scene":
         model_name = os.getenv("OPENROUTER_SCENE_MODEL", DEFAULT_SCENE_MODEL)
+    elif role == "narrative":
+        model_name = os.getenv("OPENROUTER_NARRATIVE_MODEL", DEFAULT_NARRATIVE_MODEL)
     else:
         model_name = os.getenv("OPENROUTER_ARCHITECTURE_MODEL", DEFAULT_ARCHITECTURE_MODEL)
 

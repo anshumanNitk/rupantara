@@ -1,11 +1,13 @@
 import type { PlacedWorld } from '@/world/schemas/world';
 import type { GamePack } from '../schemas/gamePack';
 import { GamePackSchema } from '../schemas/gamePack';
+import type { NarrativeGraph } from '../schemas/narrative';
 import { isWalkable } from '../schemas/tilemap';
 import { resolveTheme } from '../registries/themeRegistry';
 import { DEFAULT_ASSET_MANIFEST } from '../registries/assetResolver';
 import { compileMap } from './mapCompiler';
 import { compileQuests } from './questCompiler';
+import { compileFallbackNarrative } from './narrativeCompiler';
 import { nearestWalkable } from './grid';
 import { validateGamePack } from './validators';
 
@@ -27,6 +29,12 @@ export interface GameCompileOptions {
   seed?: number;
   /** When false, external assets are not referenced. */
   allowExternalAssets?: boolean;
+  /**
+   * A narrative produced by the Narrative Agent. When supplied it is used as
+   * the story layer; otherwise a deterministic fallback story is compiled so
+   * the world always has soul.
+   */
+  narrative?: NarrativeGraph | null;
 }
 
 /** Stable 32-bit fingerprint of a placed world (FNV-1a over canonical JSON). */
@@ -109,6 +117,12 @@ export function compileGamePack(
   ]);
   const spawnPosition = chooseSpawn(map, guide?.position ?? null, occupied);
 
+  // The story layer: use the agent's narrative when supplied, else compile a
+  // deterministic fallback so the world always has soul.
+  const narrative =
+    options.narrative ??
+    compileFallbackNarrative({ placed, landmarks, npcs, guideNpcId });
+
   const pack: GamePack = {
     schema_version: '1.0',
     world: {
@@ -127,6 +141,7 @@ export function compileGamePack(
     dialogues,
     spawn: { position: spawnPosition, facing: 'south' },
     assets: DEFAULT_ASSET_MANIFEST,
+    narrative,
   };
 
   // Validate the fully-built pack. Invalid packs never reach the renderer.

@@ -289,3 +289,248 @@ class AnalyzeRequest(BaseModel):
 class AnalyzeResponse(BaseModel):
     architecture: ArchitectureGraph
     warnings: list[str] = Field(default_factory=list)
+
+
+# ============================================================================
+# Narrative contracts — the "soul" layer.
+#
+# The Narrative Agent turns an Architecture Graph into a story: characters with
+# backstories, a sequence of story beats, missions, cutscenes and an ending.
+#
+# CRITICAL INVARIANT: narrative is a DETERMINISTIC INTERPRETATION of the
+# architecture. Every character and mission must reference a real architecture
+# node id. The agent may invent flavour, names and prose, but it may NOT invent
+# components. `NarrativeGraph.structural_errors()` enforces this.
+# ============================================================================
+
+NarrativeRole = Literal[
+    "guide",       # introduces the world and the goal
+    "mentor",      # teaches a concept
+    "guardian",    # blocks progress until understood
+    "artisan",     # embodies a tool / compute component
+    "archivist",   # embodies storage / memory
+    "messenger",   # embodies queues / brokers / events
+    "sentinel",    # embodies monitors / schedulers
+    "villain",     # embodies the central tension / failure mode
+    "ally",        # supports the player
+]
+
+BeatKind = Literal[
+    "prologue",    # opening cutscene
+    "arrival",     # enter the world
+    "meet",        # meet a character
+    "learn",       # understand a component
+    "conflict",    # a problem appears
+    "resolve",     # the problem is addressed
+    "reveal",      # a key insight
+    "climax",      # the central confrontation
+    "epilogue",    # closing cutscene
+]
+
+MissionKind = Literal["main", "side", "trial", "finale"]
+
+
+class Character(BaseModel):
+    """A named inhabitant of the world, grounded in an architecture node."""
+
+    id: str
+    name: str
+    role: NarrativeRole
+    # The architecture node this character embodies. MUST exist in the graph.
+    architecture_node_id: str
+    title: str | None = None
+    backstory: str
+    motivation: str
+    # Short line shown when the player first meets them.
+    greeting: str
+    # Facts the character may state. Grounded in the architecture; used to
+    # constrain future LLM dialogue so it cannot invent components.
+    facts: list[str] = Field(default_factory=list)
+    portrait_prompt: str | None = None
+
+
+class CutsceneLine(BaseModel):
+    speaker_id: str | None = None  # None = narrator
+    text: str
+    # Optional stage direction for the renderer (e.g. "camera pans east").
+    direction: str | None = None
+
+
+class Cutscene(BaseModel):
+    id: str
+    title: str
+    lines: list[CutsceneLine] = Field(default_factory=list)
+    # Beat this cutscene belongs to, if any.
+    beat_id: str | None = None
+
+
+class MissionObjective(BaseModel):
+    id: str
+    text: str
+    kind: Literal["visit", "inspect", "talk", "collect", "unlock"]
+    # Target ids. At least one must be set and must resolve.
+    landmark_id: str | None = None
+    npc_id: str | None = None
+    architecture_node_id: str | None = None
+
+
+class Mission(BaseModel):
+    id: str
+    title: str
+    kind: MissionKind
+    # The story beat this mission advances.
+    beat_id: str
+    # One-line hook shown in the mission brief.
+    hook: str
+    # Why this matters to the player's understanding of the repository.
+    stakes: str
+    objectives: list[MissionObjective] = Field(default_factory=list)
+    prerequisites: list[str] = Field(default_factory=list)
+    # Architecture concepts this mission teaches.
+    concepts: list[str] = Field(default_factory=list)
+    # Character who briefs the mission.
+    giver_id: str | None = None
+    # Cutscene played when the mission is accepted / completed.
+    intro_cutscene_id: str | None = None
+    outro_cutscene_id: str | None = None
+
+
+class StoryBeat(BaseModel):
+    id: str
+    kind: BeatKind
+    title: str
+    summary: str
+    # Missions that make up this beat.
+    mission_ids: list[str] = Field(default_factory=list)
+    # Beats that must complete first (forms a DAG).
+    prerequisites: list[str] = Field(default_factory=list)
+
+
+class NarrativeGraph(BaseModel):
+    schema_version: Literal["1.0"] = "1.0"
+    # The world this story belongs to.
+    world_id: str
+    # One-paragraph premise the player reads on arrival.
+    premise: str
+    # The central tension the story resolves.
+    central_conflict: str
+    # What the player should understand by the end.
+    learning_promise: str
+    characters: list[Character] = Field(default_factory=list)
+    beats: list[StoryBeat] = Field(default_factory=list)
+    missions: list[Mission] = Field(default_factory=list)
+    cutscenes: list[Cutscene] = Field(default_factory=list)
+    # Cutscene played on first load.
+    prologue_cutscene_id: str | None = None
+    # Cutscene played when the final mission completes.
+    epilogue_cutscene_id: str | None = None
+    # The mission that ends the game.
+    finale_mission_id: str | None = None
+
+    def structural_errors(self, architecture: ArchitectureGraph) -> list[str]:
+        """Validates the narrative against the architecture it claims to explain.
+
+        This is the guardrail that keeps the story honest: every character and
+        mission must point at a real architecture node, and every internal
+        reference must resolve.
+        """
+        errors: list[str] = []
+
+        node_ids = {n.id for n in architecture.nodes}
+        char_ids = {c.id for c in self.characters}
+        beat_ids = {b.id for b in self.beats}
+        mission_ids = {m.id for m in self.missions}
+        cutscene_ids = {c.id for c in self.cutscenes}
+
+        def dup(label: str, ids: list[str]) -> None:
+            seen: set[str] = set()
+            for i in ids:
+                if i in seen:
+                    errors.append(f"Duplicate {label} id: {i}")
+                seen.add(i)
+
+        dup("character", [c.id for c in self.characters])
+        dup("beat", [b.id for b in self.beats])
+        dup("mission", [m.id for m in self.missions])
+        dup("cutscene", [c.id for c in self.cutscenes])
+
+        # Characters must embody a real architecture node.
+        for c in self.characters:
+            if c.architecture_node_id not in node_ids:
+                errors.append(
+                    f'Character "{c.id}" references unknown architecture node '
+                    f'"{c.architecture_node_id}"'
+                )
+
+        # Beats: prerequisites resolve, no cycles.
+        for b in self.beats:
+            for p in b.prerequisites:
+                if p not in beat_ids:
+                    errors.append(f'Beat "{b.id}" references unknown prerequisite "{p}"')
+            for mid in b.mission_ids:
+                if mid not in mission_ids:
+                    errors.append(f'Beat "{b.id}" references unknown mission "{mid}"')
+
+        # Missions: references resolve, prerequisites resolve, no cycles.
+        for m in self.missions:
+            if m.beat_id not in beat_ids:
+                errors.append(f'Mission "{m.id}" references unknown beat "{m.beat_id}"')
+            for p in m.prerequisites:
+                if p not in mission_ids:
+                    errors.append(f'Mission "{m.id}" references unknown prerequisite "{p}"')
+            if m.giver_id is not None and m.giver_id not in char_ids:
+                errors.append(f'Mission "{m.id}" references unknown giver "{m.giver_id}"')
+            if m.intro_cutscene_id is not None and m.intro_cutscene_id not in cutscene_ids:
+                errors.append(f'Mission "{m.id}" references unknown intro cutscene "{m.intro_cutscene_id}"')
+            if m.outro_cutscene_id is not None and m.outro_cutscene_id not in cutscene_ids:
+                errors.append(f'Mission "{m.id}" references unknown outro cutscene "{m.outro_cutscene_id}"')
+            for o in m.objectives:
+                if o.architecture_node_id is not None and o.architecture_node_id not in node_ids:
+                    errors.append(
+                        f'Objective "{o.id}" references unknown architecture node '
+                        f'"{o.architecture_node_id}"'
+                    )
+
+        # Cutscenes: speakers resolve.
+        for c in self.cutscenes:
+            for line in c.lines:
+                if line.speaker_id is not None and line.speaker_id not in char_ids:
+                    errors.append(f'Cutscene "{c.id}" line references unknown speaker "{line.speaker_id}"')
+
+        # Top-level references.
+        if self.prologue_cutscene_id is not None and self.prologue_cutscene_id not in cutscene_ids:
+            errors.append(f"Unknown prologue cutscene: {self.prologue_cutscene_id}")
+        if self.epilogue_cutscene_id is not None and self.epilogue_cutscene_id not in cutscene_ids:
+            errors.append(f"Unknown epilogue cutscene: {self.epilogue_cutscene_id}")
+        if self.finale_mission_id is not None and self.finale_mission_id not in mission_ids:
+            errors.append(f"Unknown finale mission: {self.finale_mission_id}")
+
+        # Mission prerequisite cycles.
+        prereqs = {m.id: m.prerequisites for m in self.missions}
+        for m in self.missions:
+            seen = {m.id}
+            stack = list(m.prerequisites)
+            while stack:
+                cur = stack.pop()
+                if cur in seen:
+                    errors.append(f'Mission cycle detected involving "{m.id}"')
+                    break
+                seen.add(cur)
+                stack.extend(prereqs.get(cur, []))
+
+        return errors
+
+
+class NarrativeRequest(BaseModel):
+    """Architecture Graph -> Narrative Graph."""
+
+    architecture: ArchitectureGraph
+    # Optional world id override; defaults to the repository name.
+    world_id: str | None = None
+    # Optional theme hint so the story matches the visual theme.
+    theme: str | None = None
+
+
+class NarrativeResponse(BaseModel):
+    narrative: NarrativeGraph
+    warnings: list[str] = Field(default_factory=list)

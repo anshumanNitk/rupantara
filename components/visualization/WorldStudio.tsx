@@ -1,8 +1,10 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ArchitectureGraph } from '@/world/schemas/architecture';
 import type { RuntimeEvent } from '@/world/schemas/runtimeEvent';
+import type { NarrativeGraph } from '@/game/schemas/narrative';
+import { NarrativeGraphSchema } from '@/game/schemas/narrative';
 import { buildWorld } from '@/world/compiler';
 import { WorldExplorer } from './WorldExplorer';
 import { RepoInput } from './RepoInput';
@@ -38,6 +40,8 @@ export function WorldStudio({ initialArchitecture, initialLabel, initialEvents }
   const [analyzing, setAnalyzing] = useState(false);
   const [compileError, setCompileError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('rpg');
+  const [narrative, setNarrative] = useState<NarrativeGraph | null>(null);
+  const [narrativeLoading, setNarrativeLoading] = useState(false);
 
   // Compilation is pure, so it is safe to derive during render.
   const compiled = useMemo(() => {
@@ -49,6 +53,37 @@ export function WorldStudio({ initialArchitecture, initialLabel, initialEvents }
         error: error instanceof Error ? error.message : 'Failed to compile the world.',
       };
     }
+  }, [architecture]);
+
+  // Fetch a story for the current architecture. The Narrative Agent gives the
+  // world its soul; if it is unavailable the client compiles a deterministic
+  // fallback story, so this is best-effort and never blocks play.
+  useEffect(() => {
+    let cancelled = false;
+    setNarrative(null);
+    setNarrativeLoading(true);
+
+    void (async () => {
+      try {
+        const response = await fetch('/api/narrative', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ architecture }),
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { narrative?: unknown };
+        const parsed = NarrativeGraphSchema.safeParse(payload.narrative);
+        if (!cancelled && parsed.success) setNarrative(parsed.data);
+      } catch {
+        // Best-effort: the deterministic fallback story covers this case.
+      } finally {
+        if (!cancelled) setNarrativeLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [architecture]);
 
   const handleAnalyzed = useCallback((next: ArchitectureGraph, warnings: string[]) => {
@@ -87,6 +122,7 @@ export function WorldStudio({ initialArchitecture, initialLabel, initialEvents }
             architecture={compiled.result.architecture}
             placed={compiled.result.placed}
             initialEvents={events}
+            narrative={narrative}
             repoInput={repoInput}
             onSwitchToCity={() => setViewMode('city')}
           />

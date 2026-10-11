@@ -19,7 +19,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from architecture_agent import analyze_repository, analyze_repository_url
-from contracts import AnalyzeRequest, AnalyzeResponse, ArchitectureGraph
+from contracts import (
+    AnalyzeRequest,
+    AnalyzeResponse,
+    ArchitectureGraph,
+    NarrativeRequest,
+    NarrativeResponse,
+)
+from narrative_agent import write_narrative
 from repo_fetcher import RateLimitError, RepositoryFetchError, parse_repo_url
 from scene_agent import generate_scene
 from scene_validator import validate_scene_code
@@ -155,6 +162,27 @@ def analyze_url(request: AnalyzeUrlRequest) -> AnalyzeResponse:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return AnalyzeResponse(architecture=architecture, warnings=warnings)
+
+
+@app.post("/projects/narrative/generate", response_model=NarrativeResponse)
+def narrative_generate(request: NarrativeRequest) -> NarrativeResponse:
+    """Architecture Graph -> Narrative Graph.
+
+    The story is validated against the architecture it claims to explain before
+    it leaves this service: every character and mission must reference a real
+    component. The agent may invent prose, never components.
+    """
+    try:
+        narrative, warnings = write_narrative(
+            request.architecture,
+            world_id=request.world_id,
+            theme=request.theme,
+        )
+    except Exception as exc:  # noqa: BLE001 - surfaced to the caller as 502
+        logger.exception("Narrative generation failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return NarrativeResponse(narrative=narrative, warnings=warnings)
 
 
 @app.post("/projects/scene/generate", response_model=SceneGenerateResponse)

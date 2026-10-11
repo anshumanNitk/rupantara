@@ -1,0 +1,11 @@
+export * from './core/types';
+export { Game, type Intent, type RuntimeEntity } from './core/game';
+export { EventBus } from './core/events';
+export { findPath, nearestFree } from './core/pathfinding';
+export { validatePack, type Issue } from './core/validate';
+export * from './assets/shapes';
+export * from './assets/resolver';
+export * from './dialogue/providers';
+export { TOOL_DEFS, PackBuilder } from './agent/tools';
+export { ThreeRenderer, buildShape, type RendererOptions } from './render/three';
+export { HudUI, KeyboardInput } from './render/ui';

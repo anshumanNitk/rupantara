@@ -16,6 +16,67 @@ export function validateGamePack(pack: GamePack): string[] {
   errors.push(...validatePlacement(pack));
   errors.push(...validateQuestGraph(pack));
   errors.push(...validateReachability(pack));
+  errors.push(...validateNarrative(pack));
+
+  return errors;
+}
+
+/**
+ * The narrative must be grounded in the pack it belongs to: every character and
+ * mission objective must reference a real landmark/NPC, and every internal
+ * reference must resolve. This is what stops a story from inventing components.
+ */
+function validateNarrative(pack: GamePack): string[] {
+  const narrative = pack.narrative;
+  if (!narrative) return [];
+
+  const errors: string[] = [];
+  const landmarkIds = new Set(pack.landmarks.map((l) => l.id));
+  const npcIds = new Set(pack.npcs.map((n) => n.id));
+  const characterIds = new Set(narrative.characters.map((c) => c.id));
+  const beatIds = new Set(narrative.beats.map((b) => b.id));
+  const missionIds = new Set(narrative.missions.map((m) => m.id));
+  const cutsceneIds = new Set(narrative.cutscenes.map((c) => c.id));
+
+  for (const mission of narrative.missions) {
+    if (!beatIds.has(mission.beat_id)) {
+      errors.push(`Narrative mission "${mission.id}" references unknown beat "${mission.beat_id}"`);
+    }
+    for (const prereq of mission.prerequisites) {
+      if (!missionIds.has(prereq)) {
+        errors.push(`Narrative mission "${mission.id}" references unknown prerequisite "${prereq}"`);
+      }
+    }
+    if (mission.giver_id != null && !characterIds.has(mission.giver_id)) {
+      errors.push(`Narrative mission "${mission.id}" references unknown giver "${mission.giver_id}"`);
+    }
+    for (const objective of mission.objectives) {
+      if (objective.landmark_id != null && !landmarkIds.has(objective.landmark_id)) {
+        errors.push(`Narrative objective "${objective.id}" references unknown landmark "${objective.landmark_id}"`);
+      }
+      if (objective.npc_id != null && !npcIds.has(objective.npc_id)) {
+        errors.push(`Narrative objective "${objective.id}" references unknown NPC "${objective.npc_id}"`);
+      }
+    }
+  }
+
+  for (const cutscene of narrative.cutscenes) {
+    for (const line of cutscene.lines) {
+      if (line.speaker_id != null && !characterIds.has(line.speaker_id)) {
+        errors.push(`Narrative cutscene "${cutscene.id}" references unknown speaker "${line.speaker_id}"`);
+      }
+    }
+  }
+
+  if (narrative.prologue_cutscene_id != null && !cutsceneIds.has(narrative.prologue_cutscene_id)) {
+    errors.push(`Narrative references unknown prologue cutscene "${narrative.prologue_cutscene_id}"`);
+  }
+  if (narrative.epilogue_cutscene_id != null && !cutsceneIds.has(narrative.epilogue_cutscene_id)) {
+    errors.push(`Narrative references unknown epilogue cutscene "${narrative.epilogue_cutscene_id}"`);
+  }
+  if (narrative.finale_mission_id != null && !missionIds.has(narrative.finale_mission_id)) {
+    errors.push(`Narrative references unknown finale mission "${narrative.finale_mission_id}"`);
+  }
 
   return errors;
 }

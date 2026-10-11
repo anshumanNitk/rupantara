@@ -20,6 +20,8 @@ export interface GameHudProps {
   onInteract: () => void;
   onOpenQuestLog: () => void;
   onOpenCodex: () => void;
+  onOpenMissions: () => void;
+  onOpenCharacters: () => void;
   onOpenDeveloper: () => void;
   onSwitchToCity: () => void;
   onReset: () => void;
@@ -32,6 +34,8 @@ export function GameHud({
   onInteract,
   onOpenQuestLog,
   onOpenCodex,
+  onOpenMissions,
+  onOpenCharacters,
   onOpenDeveloper,
   onSwitchToCity,
   onReset,
@@ -71,7 +75,9 @@ export function GameHud({
           {objective && (
             <div style={{ fontSize: 12, color: '#c7d2e0', marginTop: 6 }}>• {objective.description}</div>
           )}
-          <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+          <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+            <button type="button" style={buttonStyle(accent)} onClick={onOpenMissions}>Missions</button>
+            <button type="button" style={buttonStyle(accent)} onClick={onOpenCharacters}>Characters</button>
             <button type="button" style={buttonStyle(accent)} onClick={onOpenQuestLog}>Quest Log</button>
             <button type="button" style={buttonStyle(accent)} onClick={onOpenCodex}>Codex</button>
           </div>

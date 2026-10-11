@@ -8,6 +8,7 @@ import { InteractionSchema } from './interaction';
 import { DialogueTreeSchema } from './dialogue';
 import { ThemeSchema } from './theme';
 import { AssetManifestSchema } from './assetManifest';
+import { NarrativeGraphSchema } from './narrative';
 
 /**
  * GamePack — the declarative boundary between the deterministic world compiler
@@ -54,5 +55,11 @@ export const GamePackSchema = z.object({
     facing: FacingSchema.default('south'),
   }),
   assets: AssetManifestSchema,
+  /**
+   * The story layer. Optional so a pack is still valid without it, but when
+   * present it gives the world its soul: characters, beats, missions,
+   * cutscenes and an ending. Always grounded in the architecture.
+   */
+  narrative: NarrativeGraphSchema.nullish(),
 });
 export type GamePack = z.infer<typeof GamePackSchema>;

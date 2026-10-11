@@ -8,4 +8,5 @@ export * from './dialogue';
 export * from './theme';
 export * from './assetManifest';
 export * from './gameState';
+export * from './narrative';
 export * from './gamePack';
