@@ -15,6 +15,8 @@ import { tokensForTheme } from './rpgTokens';
 import { RpgCanvas } from './RpgCanvas';
 import { GameHud } from './GameHud';
 import { DialoguePanel } from './DialoguePanel';
+import { useDialogue } from './useDialogue';
+import { QuizPanel } from './QuizPanel';
 import { QuestLog } from './QuestLog';
 import { CodexPanel } from './CodexPanel';
 import { DeveloperDrawer } from './DeveloperDrawer';
@@ -128,6 +130,7 @@ function RpgStudioInner({
   const [panel, setPanel] = useState<Panel>('none');
   const [codexEntity, setCodexEntity] = useState<string | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<string | null>(null);
+  const [quizQuestId, setQuizQuestId] = useState<string | null>(null);
 
   const narrative = pack.narrative ?? null;
 
@@ -158,11 +161,27 @@ function RpgStudioInner({
 
   const dialogueOpen = state.dialogue.npc_id !== null && state.dialogue.node_id !== null;
 
+  // Optional free-form conversation layer, answered by the dialogue provider
+  // chain. It never touches the deterministic game state.
+  const { conversation, start: startConversation, send: sendConversation, close: closeConversation } =
+    useDialogue(pack, state);
+  const canConverseHere = useMemo(() => {
+    if (state.dialogue.npc_id === null) return false;
+    const npc = pack.npcs.find((n) => n.id === state.dialogue.npc_id);
+    if (!npc) return false;
+    return (pack.narrative?.characters.find((c) => c.architecture_node_id === npc.architecture_entity_id)?.facts.length ?? 0) > 0;
+  }, [pack, state.dialogue.npc_id]);
+
   // Detect the finale completing so the ending screen can play.
   const finaleComplete = useMemo(() => {
-    if (!narrative?.finale_mission_id) return false;
-    return state.quests.find((q) => q.quest_id === narrative.finale_mission_id)?.status === 'completed';
-  }, [narrative, state.quests]);
+    // While the Narrative Agent is writing we use the deterministic tutorial
+    // chain; after it arrives its finale is a real runtime quest. In both
+    // cases the player gets a complete ending rather than a dead last task.
+    const runtimeFinale = narrative?.finale_mission_id && pack.quests.some((quest) => quest.id === narrative.finale_mission_id)
+      ? narrative.finale_mission_id
+      : pack.quests[pack.quests.length - 1]?.id ?? null;
+    return runtimeFinale !== null && state.quests.find((quest) => quest.quest_id === runtimeFinale)?.status === 'completed';
+  }, [narrative, pack.quests, state.quests]);
 
   useEffect(() => {
     if (finaleComplete && !endingSeen) {
@@ -170,6 +189,19 @@ function RpgStudioInner({
       if (narrative?.epilogue_cutscene_id) setCutsceneId(narrative.epilogue_cutscene_id);
     }
   }, [finaleComplete, endingSeen, narrative]);
+
+  // Auto-open the quiz when a quest's objectives are done but its verifiable
+  // quiz has not been passed. This is the "prove you understand" gate.
+  useEffect(() => {
+    if (quizQuestId !== null || cutsceneId !== null) return;
+    const pending = pack.quests.find((quest) => {
+      if (!quest.quiz) return false;
+      const progress = state.quests.find((q) => q.quest_id === quest.id);
+      if (!progress || progress.status !== 'active' || progress.quiz_passed) return false;
+      return quest.objectives.every((o) => progress.completed_objectives.includes(o.id));
+    });
+    if (pending) setQuizQuestId(pending.id);
+  }, [pack.quests, state.quests, quizQuestId, cutsceneId]);
 
   const handleMove = useCallback(
     (position: { x: number; y: number }, facing: 'north' | 'south' | 'east' | 'west') => {
@@ -212,21 +244,22 @@ function RpgStudioInner({
     const handler = (event: KeyboardEvent) => {
       if (cutsceneId !== null) return; // cutscene owns the keyboard
       if (event.code === 'KeyE' || event.code === 'Enter') {
-        if (dialogueOpen) return;
+        if (dialogueOpen || conversation !== null) return;
         handleInteract();
       }
       if (event.code === 'Escape') {
         setPanel('none');
         dispatch({ type: 'close_dialogue' });
+        closeConversation();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [handleInteract, dialogueOpen, cutsceneId]);
+  }, [handleInteract, dialogueOpen, conversation, closeConversation, cutsceneId]);
 
   void initialEvents;
 
-  const frozen = dialogueOpen || panel !== 'none' || cutsceneId !== null;
+  const frozen = dialogueOpen || conversation !== null || panel !== 'none' || cutsceneId !== null || quizQuestId !== null;
 
   return (
     <AssetResolverProvider value={assetResolver}>
@@ -255,20 +288,34 @@ function RpgStudioInner({
           dispatch({ type: 'reset' });
           setPanel('none');
           setEndingSeen(false);
+          setQuizQuestId(null);
           setCutsceneId(narrative?.prologue_cutscene_id ?? null);
         }}
       />
 
-      {dialogueOpen && (
+      {(dialogueOpen || conversation) && (
         <DialoguePanel
           pack={pack}
           state={state}
           onChoice={(choiceId) => dispatch({ type: 'dialogue_choice', choiceId })}
           onClose={() => dispatch({ type: 'close_dialogue' })}
+          conversation={conversation}
+          onStartConversation={canConverseHere ? () => startConversation(state.dialogue.npc_id!) : undefined}
+          onSend={sendConversation}
+          onCloseConversation={closeConversation}
         />
       )}
 
       {panel === 'quests' && <QuestLog pack={pack} state={state} onClose={() => setPanel('none')} />}
+      {quizQuestId && (
+        <QuizPanel
+          pack={pack}
+          state={state}
+          questId={quizQuestId}
+          onAnswer={(choiceIndex) => dispatch({ type: 'quiz_answer', questId: quizQuestId, choiceIndex })}
+          onClose={() => setQuizQuestId(null)}
+        />
+      )}
       {panel === 'codex' && (
         <CodexPanel
           pack={pack}

@@ -110,6 +110,19 @@ export const StoryBeatSchema = z.object({
 });
 export type StoryBeat = z.infer<typeof StoryBeatSchema>;
 
+export const StoryLocationSchema = z.object({
+  id: IdSchema,
+  name: z.string().min(1),
+  /** A rumor, custom or overheard line about this place. */
+  rumor: z.string().min(1),
+  /** Optional district this location flavours. */
+  district_id: z.string().nullish(),
+  /** Optional architecture node this place embodies. */
+  architecture_node_id: z.string().nullish(),
+  biome: z.string().nullish(),
+});
+export type StoryLocation = z.infer<typeof StoryLocationSchema>;
+
 export const NarrativeGraphSchema = z.object({
   schema_version: z.literal('1.0'),
   world_id: z.string().min(1),
@@ -120,6 +133,8 @@ export const NarrativeGraphSchema = z.object({
   beats: z.array(StoryBeatSchema).default([]),
   missions: z.array(MissionSchema).default([]),
   cutscenes: z.array(CutsceneSchema).default([]),
+  /** Named places the compiler stamps onto districts. Advisory flavour. */
+  locations: z.array(StoryLocationSchema).default([]),
   prologue_cutscene_id: z.string().nullish(),
   epilogue_cutscene_id: z.string().nullish(),
   finale_mission_id: z.string().nullish(),

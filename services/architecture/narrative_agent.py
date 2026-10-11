@@ -103,6 +103,12 @@ A single JSON object with this exact shape:
       "lines": [ { "speaker_id": str|null, "text": str, "direction": str|null } ]
     }
   ],
+  "locations": [
+    {
+      "id": str, "name": str, "rumor": str,
+      "district_id": str|null, "architecture_node_id": str|null, "biome": str|null
+    }
+  ],
   "prologue_cutscene_id": str|null,
   "epilogue_cutscene_id": str|null,
   "finale_mission_id": str|null
@@ -144,9 +150,17 @@ STORYTELLING GUIDANCE
   semantic types to choose roles, but never name a technology as a character.
 - Give the central tension a real basis: a missing link, a fragile dependency,
   a component everything relies on, a flow that must not break.
-- Characters should feel like they belong to this world, not generic NPCs.
+- Characters should feel like they belong to this world, not generic NPCs. Give
+  each a NAME (not "Archivist of X"), a specific grievance, and a distinct voice.
+  Their `facts` must be checkable statements about the real components.
 - Missions should escalate: understand a piece -> understand how pieces connect
-  -> understand the whole.
+  -> understand the whole. Do NOT make every mission "inspect every hall" — that
+  is a checklist, not a story. Give each mission a specific target and a reason.
+- Include at least one SIDE mission (kind "side") that reveals flavour or a
+  secondary truth, and at least one mission where the player must TALK to a
+  named character rather than inspect a building.
+- `locations` should name the districts the player will walk through, each with
+  a rumor that hints at the architecture without stating it flatly.
 - Cutscenes should be short (3-8 lines) and reveal something each time.
 - The epilogue must pay off the learning promise: the player should feel they
   now understand the repository end to end.
@@ -250,6 +264,60 @@ def _strip_fences(text: str) -> str:
     return stripped
 
 
+def _break_mission_cycles(payload: dict[str, Any]) -> list[str]:
+    """Deterministically removes cycles from mission prerequisites.
+
+    The model is asked to produce a DAG, but it sometimes emits a cycle. Rather
+    than spend another slow model round-trip hoping it fixes itself, we break the
+    cycle here: for each mission, drop any prerequisite that would close a loop.
+    This is "models propose, deterministic code disposes" applied to the story.
+
+    Returns a list of human-readable notes about what was changed.
+    """
+    missions = payload.get("missions")
+    if not isinstance(missions, list):
+        return []
+
+    prereqs: dict[str, list[str]] = {}
+    for mission in missions:
+        if not isinstance(mission, dict):
+            continue
+        mid = mission.get("id")
+        if isinstance(mid, str):
+            raw = mission.get("prerequisites")
+            prereqs[mid] = [p for p in raw if isinstance(p, str)] if isinstance(raw, list) else []
+
+    notes: list[str] = []
+
+    def reaches(start: str, target: str, seen: set[str]) -> bool:
+        """True if `target` is reachable from `start` via prerequisites."""
+        if start == target:
+            return True
+        if start in seen:
+            return False
+        seen.add(start)
+        return any(reaches(p, target, seen) for p in prereqs.get(start, []))
+
+    for mission in missions:
+        if not isinstance(mission, dict):
+            continue
+        mid = mission.get("id")
+        if not isinstance(mid, str):
+            continue
+        kept: list[str] = []
+        for prereq in prereqs.get(mid, []):
+            # Dropping this edge if the prerequisite already depends on `mid`
+            # (directly or transitively) keeps the graph acyclic.
+            if prereq == mid or reaches(prereq, mid, set()):
+                notes.append(f'Broke mission cycle: removed prerequisite "{prereq}" from "{mid}"')
+                continue
+            kept.append(prereq)
+        mission["prerequisites"] = kept
+        prereqs[mid] = kept
+
+    return notes
+
+
 def _validate_story(state: NarrativeState) -> NarrativeState:
     errors: list[str] = []
 
@@ -257,6 +325,10 @@ def _validate_story(state: NarrativeState) -> NarrativeState:
         payload = json.loads(_strip_fences(state["raw_output"]))
     except json.JSONDecodeError as exc:
         return {**state, "narrative": None, "errors": [f"Output is not valid JSON: {exc}"]}
+
+    # Deterministic repair: break mission cycles before validating, so a cyclic
+    # story is fixed in-process instead of costing another model round-trip.
+    cycle_notes = _break_mission_cycles(payload) if isinstance(payload, dict) else []
 
     try:
         narrative = NarrativeGraph.model_validate(payload)
@@ -271,7 +343,8 @@ def _validate_story(state: NarrativeState) -> NarrativeState:
     if structural:
         return {**state, "narrative": None, "errors": structural}
 
-    return {**state, "narrative": narrative.model_dump(), "errors": []}
+    warnings = list(state.get("warnings", [])) + cycle_notes
+    return {**state, "narrative": narrative.model_dump(), "errors": [], "warnings": warnings}
 
 
 def _route_after_validation(state: NarrativeState) -> Literal["repair", "finalize"]:

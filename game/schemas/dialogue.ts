@@ -15,6 +15,7 @@ export const DialogueEffectSchema = z.enum([
   'grant_unlock',
   'reveal_codex',
   'start_quest',
+  'recruit_companion',
 ]);
 
 export const DialogueChoiceSchema = z.object({
@@ -25,6 +26,8 @@ export const DialogueChoiceSchema = z.object({
   effects: z.array(DialogueEffectSchema).default([]),
   /** Quest id this choice can start/advance. */
   quest_id: IdSchema.nullable().default(null),
+  /** NPC who starts following the player, when this choice recruits them. */
+  companion_npc_id: IdSchema.nullish(),
 });
 export type DialogueChoice = z.infer<typeof DialogueChoiceSchema>;
 

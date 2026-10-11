@@ -406,6 +406,21 @@ class StoryBeat(BaseModel):
     prerequisites: list[str] = Field(default_factory=list)
 
 
+class StoryLocation(BaseModel):
+    """A named place the compiler stamps onto a district.
+
+    Advisory flavour only: it may rename a district and attach a rumor, but it
+    can never move geometry or invent a component.
+    """
+
+    id: str
+    name: str
+    rumor: str
+    district_id: str | None = None
+    architecture_node_id: str | None = None
+    biome: str | None = None
+
+
 class NarrativeGraph(BaseModel):
     schema_version: Literal["1.0"] = "1.0"
     # The world this story belongs to.
@@ -420,6 +435,8 @@ class NarrativeGraph(BaseModel):
     beats: list[StoryBeat] = Field(default_factory=list)
     missions: list[Mission] = Field(default_factory=list)
     cutscenes: list[Cutscene] = Field(default_factory=list)
+    # Named places the compiler stamps onto districts (advisory flavour).
+    locations: list[StoryLocation] = Field(default_factory=list)
     # Cutscene played on first load.
     prologue_cutscene_id: str | None = None
     # Cutscene played when the final mission completes.
@@ -506,17 +523,31 @@ class NarrativeGraph(BaseModel):
             errors.append(f"Unknown finale mission: {self.finale_mission_id}")
 
         # Mission prerequisite cycles.
+        #
+        # A naive "have I seen this node before?" walk reports a false cycle for
+        # any diamond DAG (A -> B, A -> C, B -> D, C -> D), because D is reached
+        # twice. A real cycle exists only when a node is reached while it is
+        # still on the current DFS path, so we track the active path explicitly.
         prereqs = {m.id: m.prerequisites for m in self.missions}
+        WHITE, GREY, BLACK = 0, 1, 2
+        colour: dict[str, int] = {mid: WHITE for mid in prereqs}
+
+        def visit(node: str) -> bool:
+            """Returns True if a cycle is reachable from `node`."""
+            colour[node] = GREY
+            for dep in prereqs.get(node, []):
+                if dep not in colour:
+                    continue
+                if colour[dep] == GREY:
+                    return True
+                if colour[dep] == WHITE and visit(dep):
+                    return True
+            colour[node] = BLACK
+            return False
+
         for m in self.missions:
-            seen = {m.id}
-            stack = list(m.prerequisites)
-            while stack:
-                cur = stack.pop()
-                if cur in seen:
-                    errors.append(f'Mission cycle detected involving "{m.id}"')
-                    break
-                seen.add(cur)
-                stack.extend(prereqs.get(cur, []))
+            if colour.get(m.id) == WHITE and visit(m.id):
+                errors.append(f'Mission cycle detected involving "{m.id}"')
 
         return errors
 

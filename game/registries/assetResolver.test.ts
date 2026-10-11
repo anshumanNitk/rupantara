@@ -57,20 +57,21 @@ describe('Layered asset resolver (backwards-compatible)', () => {
     expect(resolution.kind).toBe('procedural');
   });
 
-  it('resolves a local sprite sheet', async () => {
-    const resolution = await resolveGameAsset('sprites.arcane', 'guild_hall');
-    expect(resolution.kind).toBe('sprite_sheet');
-    if (resolution.kind === 'sprite_sheet') {
-      expect(resolution.source).toBe('local');
+  it('never ships dead public-folder or CDN URIs in the default manifest', () => {
+    for (const entry of DEFAULT_ASSET_MANIFEST.entries) {
+      expect(entry.uri).toBeNull();
+      expect(entry.source).toBe('procedural');
     }
   });
 
-  it('resolves an external asset when allowed', async () => {
+  it('falls back to procedural when a missing curated id is requested', async () => {
+    const resolution = await resolveGameAsset('sprites.arcane', 'guild_hall');
+    expect(resolution.kind).toBe('procedural');
+  });
+
+  it('falls back to procedural when an unknown external id is requested', async () => {
     const resolution = await resolveGameAsset('landmark.tower.external', 'tower');
-    expect(resolution.kind).toBe('glb');
-    if (resolution.kind === 'glb') {
-      expect(resolution.source).toBe('external');
-    }
+    expect(resolution.kind).toBe('procedural');
   });
 
   it('falls back to procedural when external assets are disabled', async () => {
@@ -88,11 +89,11 @@ describe('Layered asset resolver (backwards-compatible)', () => {
     expect(resolution.kind).toBe('procedural');
   });
 
-  it('exposes a manifest with local and external entries', () => {
+  it('exposes a procedural-only default manifest', () => {
     const sources = new Set(DEFAULT_ASSET_MANIFEST.entries.map((e) => e.source));
     expect(sources.has('procedural')).toBe(true);
-    expect(sources.has('local')).toBe(true);
-    expect(sources.has('external')).toBe(true);
+    expect(sources.has('local')).toBe(false);
+    expect(sources.has('external')).toBe(false);
   });
 });
 

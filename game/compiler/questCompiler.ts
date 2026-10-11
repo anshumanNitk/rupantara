@@ -1,8 +1,8 @@
 import type { PlacedWorld } from '@/world/schemas/world';
 import type { Landmark } from '../schemas/landmark';
-import type { Npc } from '../schemas/npc';
+import type { Npc, NpcRole } from '../schemas/npc';
 import type { Interaction } from '../schemas/interaction';
-import type { Quest, Objective } from '../schemas/quest';
+import type { Quest, Objective, Quiz } from '../schemas/quest';
 import type { DialogueTree } from '../schemas/dialogue';
 import type { GameProvenance, TileCoord } from '../schemas/common';
 import type { TileMap } from '../schemas/tilemap';
@@ -10,6 +10,11 @@ import { isWalkable, inBounds } from '../schemas/tilemap';
 import { resolveLandmarkRole, resolveNpcRole, NPC_NODE_TYPES } from '../registries/semanticWorldRegistry';
 import { spriteForRole } from '../registries/spriteRegistry';
 import type { LandmarkPlacement } from './mapCompiler';
+import {
+  ambientGreeting,
+  ambientTownsfolkName,
+  ambientTownsfolkRole,
+} from './storyWorld';
 
 /**
  * Quest compiler — deterministic, template-based quests and NPCs.
@@ -93,6 +98,80 @@ function provenanceFor(entityId: string, placed: PlacedWorld): GameProvenance {
     architecture_edge_id: null,
     source: entity?.provenance?.source ?? null,
   };
+}
+
+/**
+ * Builds a verifiable quiz about a component from the dependency graph.
+ *
+ * The correct answer is derived from real edges, never invented, so the quiz
+ * genuinely tests understanding of the architecture. Returns null when the
+ * graph does not give us a clean question (e.g. an isolated node).
+ */
+export function buildQuiz(
+  entityId: string,
+  placed: PlacedWorld,
+  labelOf: (id: string) => string,
+): Quiz | null {
+  const outgoing = placed.connections.filter((c) => c.from === entityId);
+  const incoming = placed.connections.filter((c) => c.to === entityId);
+
+  const pick = (candidates: string[], exclude: Set<string>): string[] =>
+    candidates.filter((id) => id !== entityId && !exclude.has(id)).slice(0, 2);
+
+  /** Deterministic shuffle so the correct answer is not always first. */
+  const arrange = (correct: string, wrong: string[]): { choices: string[]; correct: number } => {
+    const all = [correct, ...wrong];
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < entityId.length; i += 1) {
+      hash ^= entityId.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    const offset = (hash >>> 0) % all.length;
+    const rotated = [...all.slice(offset), ...all.slice(0, offset)];
+    return { choices: rotated.map(labelOf), correct: rotated.indexOf(correct) };
+  };
+
+  if (outgoing.length > 0) {
+    const correct = outgoing[0]!.to;
+    const wrong = pick(
+      placed.entities.map((e) => e.id),
+      new Set([correct, ...outgoing.map((c) => c.to)]),
+    );
+    if (wrong.length >= 2) {
+      const { choices, correct: index } = arrange(correct, wrong);
+      return {
+        id: `quiz_${entityId}`,
+        question: `Which of these does ${labelOf(entityId)} depend on?`,
+        choices,
+        correct: index,
+        architecture_entity_id: entityId,
+        success_text: `Correct — ${labelOf(entityId)} builds on ${labelOf(correct)}.`,
+        failure_text: `Not quite. Follow the roads out of ${labelOf(entityId)} and try again.`,
+      };
+    }
+  }
+
+  if (incoming.length > 0) {
+    const correct = incoming[0]!.from;
+    const wrong = pick(
+      placed.entities.map((e) => e.id),
+      new Set([correct, ...incoming.map((c) => c.from)]),
+    );
+    if (wrong.length >= 2) {
+      const { choices, correct: index } = arrange(correct, wrong);
+      return {
+        id: `quiz_${entityId}`,
+        question: `Which of these relies on ${labelOf(entityId)}?`,
+        choices,
+        correct: index,
+        architecture_entity_id: entityId,
+        success_text: `Correct — ${labelOf(correct)} relies on ${labelOf(entityId)}.`,
+        failure_text: `Not quite. Look at what flows into ${labelOf(entityId)} and try again.`,
+      };
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -208,6 +287,8 @@ export function compileQuests(
       label: 'The Guide',
       role: 'guide',
       position,
+      wander: { radius: 1, speed: 0.45 },
+      ambient: false,
       facing: 'south',
       sprite: spriteForRole('guide').id,
       dialogue_id: dialogueId,
@@ -264,6 +345,8 @@ export function compileQuests(
       dialogue_id: dialogueId,
       architecture_entity_id: entity.id,
       quest_hooks: [],
+      wander: { radius: 3, speed: 0.85 },
+      ambient: false,
       provenance: provenanceFor(entity.id, placed),
     });
 
@@ -281,6 +364,72 @@ export function compileQuests(
         },
       ],
     });
+  }
+
+  // --- Ambient townsfolk: one per district so the streets are lived-in. ---
+  const folkPerDistrict = new Map<string, number>();
+  for (const district of map.districts) {
+    const plazaTiles: TileCoord[] = [];
+    for (let y = district.min.y; y <= district.max.y; y += 1) {
+      for (let x = district.min.x; x <= district.max.x; x += 1) {
+        if (isWalkable(map, x, y)) plazaTiles.push({ x, y });
+      }
+    }
+    const count = Math.min(2, Math.max(1, Math.floor(plazaTiles.length / 18)));
+    for (let i = 0; i < count; i += 1) {
+      const seed = `${district.id}:${i}`;
+      const preferred = plazaTiles[Math.floor((i * 7 + plazaTiles.length / 2) % plazaTiles.length)] ?? {
+        x: district.min.x + 1,
+        y: district.min.y + 1,
+      };
+      const position = findFreeNpcTile(map, preferred, occupied, entrances, MIN_ENTRANCE_DISTANCE);
+      occupied.add(TILE_KEY(position.x, position.y));
+      folkPerDistrict.set(district.id, (folkPerDistrict.get(district.id) ?? 0) + 1);
+
+      const folkId = `npc_folk_${district.id}_${i}`;
+      const dialogueId = `dialogue_${folkId}`;
+      const role: NpcRole = ambientTownsfolkRole(seed);
+      const name = ambientTownsfolkName(seed);
+      const biome = district.biome;
+      npcs.push({
+        id: folkId,
+        label: name,
+        role,
+        position,
+        facing: i % 2 === 0 ? 'east' : 'west',
+        sprite: spriteForRole(role).id,
+        dialogue_id: dialogueId,
+        architecture_entity_id: null,
+        quest_hooks: [],
+        wander: { radius: 4, speed: 0.7 + (i % 3) * 0.15 },
+        ambient: true,
+        provenance: { architecture_node_id: null, architecture_edge_id: null, source: null },
+      });
+      dialogues.push({
+        id: dialogueId,
+        npc_id: folkId,
+        root: 'root',
+        nodes: [
+          {
+            id: 'root',
+            speaker: name,
+            text: ambientGreeting(biome, seed),
+            architecture_entity_id: null,
+            choices: [
+              { id: 'rumor', label: 'What is this place?', next: 'rumor', effects: [], quest_id: null },
+              { id: 'bye', label: 'Carry on.', next: null, effects: [], quest_id: null },
+            ],
+          },
+          {
+            id: 'rumor',
+            speaker: name,
+            text: district.rumor ?? 'A district like any other, until you learn what it remembers.',
+            architecture_entity_id: null,
+            choices: [{ id: 'thanks', label: 'I will remember that.', next: null, effects: [], quest_id: null }],
+          },
+        ],
+      });
+    }
   }
 
   // --- Quests: guided chain in dependency order. ---
@@ -309,6 +458,7 @@ export function compileQuests(
       rewards: ['codex_unlocked'],
       concepts: ['guide'],
       main_path: true,
+      quiz: null,
     });
   }
 
@@ -322,6 +472,12 @@ export function compileQuests(
     architecture_entity_id: entityId,
   }));
 
+  // A verifiable quiz on the most central component: the player must prove they
+  // understand how the realm fits together, not merely walk through it.
+  const labelOf = (id: string): string => id;
+  const quizEntity = order.find((id) => buildQuiz(id, placed, labelOf) !== null) ?? null;
+  const surveyQuiz = quizEntity ? buildQuiz(quizEntity, placed, labelOf) : null;
+
   if (surveyObjectives.length > 0) {
     quests.push({
       id: 'q_survey',
@@ -332,6 +488,7 @@ export function compileQuests(
       rewards: ['realm_surveyed'],
       concepts: order,
       main_path: true,
+      quiz: surveyQuiz,
     });
   }
 
@@ -355,6 +512,7 @@ export function compileQuests(
       rewards: ['replay_unlocked'],
       concepts: ['runtime'],
       main_path: false,
+      quiz: null,
     });
   }
 

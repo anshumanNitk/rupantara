@@ -43,7 +43,7 @@ export function tokensForTheme(theme: Theme): RpgTokens {
     water: theme.palette.water,
     cliff: theme.palette.cliff,
     ground: theme.palette.ground,
-    camera: { zoom: 26, azimuth: Math.PI / 4, elevation: Math.PI / 5.2 },
+    camera: { zoom: 15, azimuth: Math.PI / 4, elevation: Math.PI / 5.2 },
     playerSpeed: 4.5,
     interactRadius: 1.6,
   };

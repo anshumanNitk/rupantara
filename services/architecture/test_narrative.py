@@ -170,3 +170,120 @@ def test_duplicate_ids_are_rejected() -> None:
     narrative.characters.append(narrative.characters[0].model_copy())
     errors = narrative.structural_errors(_architecture())
     assert any("Duplicate character id" in e for e in errors)
+
+
+# --- Deterministic cycle repair -------------------------------------------------
+#
+# The model is asked for a DAG but sometimes emits a cycle. Rather than spend a
+# slow model round-trip, the agent breaks the cycle in-process. These tests pin
+# that behaviour: a cyclic story is repaired, not rejected.
+
+from narrative_agent import _break_mission_cycles
+
+
+def test_break_mission_cycles_removes_a_two_node_cycle() -> None:
+    payload = {
+        "missions": [
+            {"id": "m_a", "prerequisites": ["m_b"]},
+            {"id": "m_b", "prerequisites": ["m_a"]},
+        ]
+    }
+    notes = _break_mission_cycles(payload)
+    assert notes, "expected the cycle to be reported"
+    # At least one edge must be gone, leaving an acyclic graph.
+    remaining = {m["id"]: m["prerequisites"] for m in payload["missions"]}
+    assert not (remaining["m_a"] and remaining["m_b"])
+
+
+def test_break_mission_cycles_removes_a_three_node_cycle() -> None:
+    payload = {
+        "missions": [
+            {"id": "m_a", "prerequisites": ["m_c"]},
+            {"id": "m_b", "prerequisites": ["m_a"]},
+            {"id": "m_c", "prerequisites": ["m_b"]},
+        ]
+    }
+    _break_mission_cycles(payload)
+    prereqs = {m["id"]: m["prerequisites"] for m in payload["missions"]}
+
+    def reaches(start: str, target: str, seen: set[str]) -> bool:
+        if start == target:
+            return True
+        if start in seen:
+            return False
+        seen.add(start)
+        return any(reaches(p, target, seen) for p in prereqs.get(start, []))
+
+    # A cycle exists iff some prerequisite of a mission reaches back to it.
+    for mid, deps in prereqs.items():
+        for dep in deps:
+            assert not reaches(dep, mid, set()), f"cycle still present at {mid}"
+
+
+def test_break_mission_cycles_leaves_a_valid_dag_untouched() -> None:
+    payload = {
+        "missions": [
+            {"id": "m_a", "prerequisites": []},
+            {"id": "m_b", "prerequisites": ["m_a"]},
+            {"id": "m_c", "prerequisites": ["m_b"]},
+        ]
+    }
+    notes = _break_mission_cycles(payload)
+    assert notes == []
+    assert payload["missions"][2]["prerequisites"] == ["m_b"]
+
+
+def test_break_mission_cycles_handles_missing_fields() -> None:
+    payload = {"missions": [{"id": "m_a"}, {"id": "m_b", "prerequisites": None}]}
+    assert _break_mission_cycles(payload) == []
+
+
+def test_diamond_dag_is_not_a_cycle() -> None:
+    """A diamond (A->B, A->C, B->D, C->D) is a valid DAG, not a cycle.
+
+    The old detector flagged any node reached twice, so it rejected every
+    diamond. This pins the fix.
+    """
+    narrative = _valid_narrative()
+    # Build a diamond: m_arrival -> {m_archive, m_guide} -> m_finale.
+    narrative.missions[0].prerequisites = []
+    narrative.missions[1].prerequisites = ["m_arrival"]
+    narrative.missions.append(
+        Mission(
+            id="m_guide",
+            title="Meet the Guide",
+            kind="side",
+            beat_id=narrative.beats[0].id,
+            hook="Find the guide.",
+            stakes="Learn the flow.",
+            objectives=[
+                MissionObjective(id="o_guide", text="Talk to the guide.", kind="talk", npc_id="guide")
+            ],
+            prerequisites=["m_arrival"],
+        )
+    )
+    narrative.missions.append(
+        Mission(
+            id="m_finale",
+            title="The Reckoning",
+            kind="finale",
+            beat_id=narrative.beats[0].id,
+            hook="Finish it.",
+            stakes="Understand the whole.",
+            objectives=[
+                MissionObjective(
+                    id="o_finale", text="Reach the agent.", kind="visit", architecture_node_id="rpa_agent"
+                )
+            ],
+            prerequisites=["m_archive", "m_guide"],
+        )
+    )
+    errors = narrative.structural_errors(_architecture())
+    assert not any("cycle" in e for e in errors), errors
+
+
+def test_real_cycle_is_still_detected() -> None:
+    narrative = _valid_narrative()
+    narrative.missions[0].prerequisites = ["m_archive"]
+    errors = narrative.structural_errors(_architecture())
+    assert any("cycle" in e for e in errors)

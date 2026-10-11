@@ -93,9 +93,16 @@ describe('PackBuilder', () => {
 
   it('searches assets through the resolver', async () => {
     const builder = new PackBuilder(pack(), createDefaultResolver());
-    const result = await builder.call('search_assets', { query: 'guild hall' });
+    const result = await builder.call('search_assets', { query: 'archive' });
     expect(result.ok).toBe(true);
     expect(result.by).toBeTruthy();
+  });
+
+  it('reports a missing asset as not ok', async () => {
+    const builder = new PackBuilder(pack(), createDefaultResolver());
+    const result = await builder.call('search_assets', { query: 'a very distinctive landmark' });
+    expect(result.ok).toBe(false);
+    expect(result.by).toBe('placeholder');
   });
 });
 

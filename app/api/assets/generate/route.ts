@@ -20,14 +20,16 @@ import path from 'node:path';
  * 3. FAILS SOFT. Any error returns a 200 with `{ ok: false }` so the client
  *    resolver falls through to the next provider (procedural/placeholder).
  *
- * The generated image is written to `public/generated/<hash>.png` and served
- * statically, so the browser only ever sees a stable local URL.
+ * Bytes live in `.cache/generated/<hash>.png` (never `public/`) and are served
+ * by GET `/api/assets/generated/<hash>`. The pack stores the API URL, not a
+ * static file path, so generated art is appearance-only and never ships as
+ * public assets.
  */
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const CACHE_DIR = path.join(process.cwd(), 'public', 'generated');
+const CACHE_DIR = path.join(process.cwd(), '.cache', 'generated');
 
 interface GenerateBody {
   prompt?: unknown;
@@ -52,20 +54,65 @@ function cacheKey(prompt: string, model: string, size: string, style: string): s
  * Calls the configured image provider. Returns a base64 PNG/JPEG or null.
  *
  * The provider is selected by `IMAGE_PROVIDER`:
- *   - "gemini"  -> Google Generative Language API (Nano Banana / Gemini image)
- *   - "none"    -> disabled; the route reports `ok: false` so the chain falls through
+ *   - "openrouter" -> OpenRouter image models (default: Google Nano Banana 2 /
+ *                     Gemini 3.1 Flash Image). Uses the SAME OPENROUTER_API_KEY
+ *                     as the agents, so no extra key is needed.
+ *   - "gemini"     -> Google Generative Language API directly (needs GOOGLE_API_KEY)
+ *   - "none"       -> disabled; the route reports `ok: false` so the chain falls through
  *
  * The exact model id is configurable via `IMAGE_MODEL` so a model rename is a
  * config change, never a code change.
  */
 async function callImageProvider(prompt: string, size: string): Promise<{ data: string; mime: string } | null> {
-  const provider = (process.env.IMAGE_PROVIDER ?? 'none').toLowerCase();
+  const provider = (process.env.IMAGE_PROVIDER ?? 'openrouter').toLowerCase();
   if (provider === 'none') return null;
 
-  const apiKey = process.env.IMAGE_API_KEY ?? process.env.GOOGLE_API_KEY ?? '';
-  if (!apiKey) return null;
+  if (provider === 'openrouter') {
+    const apiKey = process.env.OPENROUTER_API_KEY ?? '';
+    if (!apiKey) return null;
+
+    const model = process.env.IMAGE_MODEL ?? 'google/gemini-3.1-flash-image';
+    const baseUrl = process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1';
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    };
+    if (process.env.OPENROUTER_SITE_URL) headers['HTTP-Referer'] = process.env.OPENROUTER_SITE_URL;
+    if (process.env.OPENROUTER_APP_NAME) headers['X-Title'] = process.env.OPENROUTER_APP_NAME;
+
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        modalities: ['image', 'text'],
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+
+    if (!response.ok) return null;
+    const payload = (await response.json()) as {
+      choices?: {
+        message?: {
+          images?: { image_url?: { url?: string } }[];
+        };
+      }[];
+    };
+    const url = payload.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    if (!url) return null;
+
+    // OpenRouter returns a data URL: "data:image/png;base64,....".
+    const match = /^data:(image\/[a-z+]+);base64,(.+)$/i.exec(url);
+    if (!match) return null;
+    return { data: match[2]!, mime: match[1]! };
+  }
 
   if (provider === 'gemini') {
+    const apiKey = process.env.IMAGE_API_KEY ?? process.env.GOOGLE_API_KEY ?? '';
+    if (!apiKey) return null;
+
     const model = process.env.IMAGE_MODEL ?? 'gemini-3.1-flash-image';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
@@ -106,13 +153,13 @@ export async function POST(request: Request) {
 
   const theme = typeof body.theme === 'string' ? body.theme : null;
   const size = typeof body.size === 'string' ? body.size : '512x512';
-  const model = process.env.IMAGE_MODEL ?? 'gemini-3.1-flash-image';
+  const model = process.env.IMAGE_MODEL ?? 'google/gemini-3.1-flash-image';
   const style = stylePrefix(theme);
   const fullPrompt = `${style}. ${prompt}`;
   const key = cacheKey(fullPrompt, model, size, style);
 
   const filePath = path.join(CACHE_DIR, `${key}.png`);
-  const publicUrl = `/generated/${key}.png`;
+  const publicUrl = `/api/assets/generated/${key}`;
 
   // 1. Cache hit — the same request is never generated twice.
   try {

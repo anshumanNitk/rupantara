@@ -8,6 +8,7 @@ import { DEFAULT_ASSET_MANIFEST } from '../registries/assetResolver';
 import { compileMap } from './mapCompiler';
 import { compileQuests } from './questCompiler';
 import { compileFallbackNarrative } from './narrativeCompiler';
+import { compileNarrativeGameplay } from './narrativeGameplayCompiler';
 import { nearestWalkable } from './grid';
 import { validateGamePack } from './validators';
 
@@ -104,24 +105,46 @@ export function compileGamePack(
   const seed = options.seed ?? placed.world.seed;
 
   const { map, regions, placements } = compileMap(placed);
-  const { landmarks, npcs, interactions, quests, dialogues, guideNpcId } = compileQuests(
+  const base = compileQuests(
     placed,
     placements,
     map,
   );
 
-  const guide = guideNpcId ? npcs.find((n) => n.id === guideNpcId) ?? null : null;
-  const occupied = new Set<string>([
-    ...npcs.map((n) => `${n.position.x},${n.position.y}`),
-    ...landmarks.map((l) => `${l.entrance.x},${l.entrance.y}`),
-  ]);
-  const spawnPosition = chooseSpawn(map, guide?.position ?? null, occupied);
-
   // The story layer: use the agent's narrative when supplied, else compile a
   // deterministic fallback so the world always has soul.
-  const narrative =
+  const authoredNarrative =
     options.narrative ??
-    compileFallbackNarrative({ placed, landmarks, npcs, guideNpcId });
+    compileFallbackNarrative({ placed, landmarks: base.landmarks, npcs: base.npcs, guideNpcId: base.guideNpcId });
+
+  // The crucial bridge: the agent's missions and characters become the real
+  // runtime quests, NPCs and dialogue tree, rather than merely sidebar copy.
+  const story = options.narrative
+    ? compileNarrativeGameplay({
+        placed,
+        map,
+        landmarks: base.landmarks,
+        npcs: base.npcs,
+        dialogues: base.dialogues,
+        baseQuests: base.quests,
+        narrative: authoredNarrative,
+      })
+    : {
+        // Offline remains instantly playable. Once the Narrative Agent returns,
+        // the supplied narrative above replaces this tutorial chain with its
+        // authored cast and missions.
+        narrative: authoredNarrative,
+        npcs: base.npcs,
+        dialogues: base.dialogues,
+        quests: base.quests,
+      };
+
+  const guide = story.npcs.find((npc) => npc.role === 'guide') ?? null;
+  const occupied = new Set<string>([
+    ...story.npcs.map((npc) => `${npc.position.x},${npc.position.y}`),
+    ...base.landmarks.map((landmark) => `${landmark.entrance.x},${landmark.entrance.y}`),
+  ]);
+  const spawnPosition = chooseSpawn(map, guide?.position ?? null, occupied);
 
   const pack: GamePack = {
     schema_version: '1.0',
@@ -134,14 +157,14 @@ export function compileGamePack(
     theme,
     map,
     regions,
-    landmarks,
-    npcs,
-    quests,
-    interactions,
-    dialogues,
+    landmarks: base.landmarks,
+    npcs: story.npcs,
+    quests: story.quests,
+    interactions: base.interactions,
+    dialogues: story.dialogues,
     spawn: { position: spawnPosition, facing: 'south' },
     assets: DEFAULT_ASSET_MANIFEST,
-    narrative,
+    narrative: story.narrative,
   };
 
   // Validate the fully-built pack. Invalid packs never reach the renderer.

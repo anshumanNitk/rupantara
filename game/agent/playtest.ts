@@ -135,6 +135,22 @@ export function playtest(pack: GamePack): PlaytestResult {
           break;
         }
       }
+
+      // Answer the quest's quiz (if any) once its objectives are done. The bot
+      // answers correctly, so a pack is only "winnable" if the quiz is solvable.
+      const progressNow = state.quests.find((p) => p.quest_id === quest.id)!;
+      const objectivesDone = quest.objectives.every((o) =>
+        progressNow.completed_objectives.includes(o.id),
+      );
+      if (quest.quiz && objectivesDone && !progressNow.quiz_passed) {
+        apply({ type: 'quiz_answer', questId: quest.id, choiceIndex: quest.quiz.correct });
+        log.push(`answered quiz for ${quest.id}`);
+        // Answering a quiz is progress: without this, a quest whose objectives
+        // are already done but whose quiz is pending would look like a deadlock.
+        progressed = true;
+        const afterQuiz = state.quests.find((p) => p.quest_id === quest.id)!;
+        if (afterQuiz.status === 'completed') log.push(`completed ${quest.id}`);
+      }
     }
 
     if (!progressed) {

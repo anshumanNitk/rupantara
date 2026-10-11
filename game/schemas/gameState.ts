@@ -22,6 +22,8 @@ export const QuestProgressSchema = z.object({
   /** Objective ids that are complete. */
   completed_objectives: z.array(IdSchema).default([]),
   status: z.enum(['locked', 'active', 'completed']).default('locked'),
+  /** Whether the quest's quiz (if any) has been answered correctly. */
+  quiz_passed: z.boolean().default(false),
 });
 export type QuestProgress = z.infer<typeof QuestProgressSchema>;
 
@@ -43,6 +45,8 @@ export const GameStateSchema = z.object({
   /** Codex entries the player has revealed. */
   codex: z.array(IdSchema).default([]),
   dialogue: DialogueStateSchema.default({ npc_id: null, node_id: null }),
+  /** A recruited guide/friend currently travelling with the player. */
+  companion_npc_id: IdSchema.nullable().default(null),
   /** Accessibility / preference state. */
   preferences: z
     .object({

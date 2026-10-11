@@ -51,6 +51,8 @@ export function terrainColor(terrain: string, theme: Theme): string {
       return theme.palette.path;
     case 'floor':
       return theme.palette.path;
+    case 'plaza':
+      return theme.palette.cliff;
     case 'void':
       return theme.palette.sky;
     case 'grass':
@@ -63,11 +65,15 @@ export function terrainColor(terrain: string, theme: Theme): string {
 export function terrainHeight(terrain: string): number {
   switch (terrain) {
     case 'water':
-      return -0.25;
+      return -0.35;
     case 'cliff':
       return 0.6;
     case 'path':
       return 0.02;
+    case 'plaza':
+      return 0.04;
+    case 'floor':
+      return 0.03;
     default:
       return 0;
   }

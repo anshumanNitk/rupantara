@@ -95,4 +95,21 @@ describe('Narrative layer', () => {
     expect(pack.narrative).toBeTruthy();
     expect(validateGamePack(pack)).toEqual([]);
   });
+
+  it('turns an authored narrative into the playable cast and mission path', () => {
+    const placed = buildWorld(RPA_ARCHITECTURE).placed;
+    const fallbackPack = compileGamePack(placed);
+    const authored = fallbackPack.narrative!;
+    const pack = compileGamePack(placed, { narrative: authored });
+
+    // The agent output is not a codex-only overlay: its missions are the
+    // runtime quests, every named character can be met, and its finale can
+    // trigger the real ending.
+    expect(pack.quests.map((quest) => quest.id)).toEqual(authored.missions.map((mission) => mission.id));
+    for (const character of authored.characters) {
+      expect(pack.npcs.some((npc) => npc.architecture_entity_id === character.architecture_node_id)).toBe(true);
+    }
+    expect(pack.quests.some((quest) => quest.id === authored.finale_mission_id)).toBe(true);
+    expect(validateGamePack(pack)).toEqual([]);
+  });
 });

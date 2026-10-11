@@ -17,6 +17,7 @@ export type GameAction =
   | { type: 'talk'; npcId: string }
   | { type: 'dialogue_choice'; choiceId: string }
   | { type: 'close_dialogue' }
+  | { type: 'quiz_answer'; questId: string; choiceIndex: number }
   | { type: 'reset' }
   | { type: 'set_preference'; key: 'reduced_motion' | 'high_contrast'; value: boolean };
 
@@ -25,6 +26,7 @@ export function createInitialGameState(pack: GamePack): GameState {
     quest_id: quest.id,
     completed_objectives: [],
     status: quest.prerequisites.length === 0 ? 'active' : 'locked',
+    quiz_passed: false,
   }));
 
   return {
@@ -36,6 +38,7 @@ export function createInitialGameState(pack: GamePack): GameState {
     unlocks: [],
     codex: [],
     dialogue: { npc_id: null, node_id: null },
+    companion_npc_id: null,
     preferences: { reduced_motion: false, high_contrast: false },
   };
 }
@@ -58,7 +61,11 @@ function completeObjective(
   if (!progress || progress.status === 'completed') return state;
 
   const completed = unique([...progress.completed_objectives, objectiveId]);
-  const allDone = quest.objectives.every((o) => completed.includes(o.id));
+  const allObjectivesDone = quest.objectives.every((o) => completed.includes(o.id));
+  // A quest with a quiz is only complete once the quiz is passed. This is what
+  // makes "did the player understand?" verifiable rather than assumed.
+  const quizSatisfied = quest.quiz === null || progress.quiz_passed;
+  const allDone = allObjectivesDone && quizSatisfied;
 
   let next: GameState = {
     ...state,
@@ -136,10 +143,11 @@ export function reduceGameState(pack: GamePack, state: GameState, action: GameAc
         player: { ...state.player, discovered: unique([...state.player.discovered, npc.id]) },
       };
 
-      // Talking satisfies any `talk` objective targeting this NPC.
+      // Talking satisfies any objective targeting this NPC, regardless of kind
+      // (`talk` and `visit` both resolve by reaching and speaking to the NPC).
       for (const quest of pack.quests) {
         for (const objective of quest.objectives) {
-          if (objective.kind === 'talk' && objective.npc_id === npc.id) {
+          if (objective.npc_id === npc.id) {
             next = completeObjective(pack, next, quest.id, objective.id);
           }
         }
@@ -167,6 +175,9 @@ export function reduceGameState(pack: GamePack, state: GameState, action: GameAc
       if (choice.effects.includes('grant_unlock')) {
         next = { ...next, unlocks: unique([...next.unlocks, choice.quest_id ?? '']) };
       }
+      if (choice.effects.includes('recruit_companion') && choice.companion_npc_id !== null) {
+        next = { ...next, companion_npc_id: choice.companion_npc_id };
+      }
 
       // A choice with no next node ends the conversation. Close it fully so the
       // world is not left frozen with a dangling npc_id and no node.
@@ -179,6 +190,30 @@ export function reduceGameState(pack: GamePack, state: GameState, action: GameAc
 
     case 'close_dialogue':
       return { ...state, dialogue: { npc_id: null, node_id: null } };
+
+    case 'quiz_answer': {
+      const quest = pack.quests.find((q) => q.id === action.questId);
+      const progress = state.quests.find((q) => q.quest_id === action.questId);
+      if (!quest?.quiz || !progress || progress.status === 'completed') return state;
+      if (action.choiceIndex !== quest.quiz.correct) return state;
+
+      // Correct answer: mark the quiz passed, then re-evaluate completion so a
+      // quest whose objectives are already done completes immediately.
+      let next: GameState = {
+        ...state,
+        quests: state.quests.map((q) =>
+          q.quest_id === action.questId ? { ...q, quiz_passed: true } : q,
+        ),
+      };
+
+      const allObjectivesDone = quest.objectives.every((o) =>
+        next.quests.find((q) => q.quest_id === action.questId)!.completed_objectives.includes(o.id),
+      );
+      if (allObjectivesDone) {
+        next = completeObjective(pack, next, action.questId, quest.objectives[0]!.id);
+      }
+      return next;
+    }
 
     case 'reset':
       return createInitialGameState(pack);

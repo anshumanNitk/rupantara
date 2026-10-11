@@ -36,6 +36,17 @@ export interface AssetRequest {
   primitive?: string;
   /** Theme id, used to keep generated art stylistically consistent. */
   theme?: string;
+  /**
+   * Opt in to AI generation for this request.
+   *
+   * When true, the exact procedural provider stands aside so the chain can try
+   * curated catalogs and then the generator before falling back to procedural
+   * geometry. This is how a landmark gets a generated image while terrain and
+   * NPCs stay cheap and deterministic.
+   */
+  generate?: boolean;
+  /** The visual role shapes an AI prompt without ever changing game logic. */
+  kind?: 'landmark' | 'character' | 'ui';
 }
 
 export interface AssetProvider {
@@ -123,11 +134,16 @@ export class ProceduralProvider implements AssetProvider {
       // An explicit asset id means the caller wants a curated asset, not a
       // procedural primitive.
       if (req.assetId !== undefined) return null;
+      // A request that opted in to generation must not be short-circuited by
+      // the exact procedural provider, or the generator would never be reached.
+      if (req.generate) return null;
       if (req.primitive) return { kind: 'procedural', primitive: req.primitive };
       return null;
     }
 
     if (!req.ref) return null;
+    // A generation request must reach the generator, not the fuzzy fallback.
+    if (req.generate) return null;
     const tokens = tokenize(req.ref);
     const match = tokens.find((token) => KNOWN_PRIMITIVES.has(token));
     return match ? { kind: 'procedural', primitive: match } : null;
@@ -314,8 +330,11 @@ export function createThemeResolver(
 // ---------------------------------------------------------------------------
 
 /**
- * Built-in manifest. Local entries ship with the app; external entries point at
- * a CDN. Unknown ids fall through to procedural geometry.
+ * Built-in manifest. Procedural primitives only.
+ *
+ * Dead local URIs (`/assets/sprites/*.png`) and placeholder CDNs used to win
+ * the catalog step, 404 in the browser, and starve image generation. Real
+ * curated files belong in `themeCatalogs.ts` once they actually ship.
  */
 export const DEFAULT_ASSET_MANIFEST: AssetManifest = {
   schema_version: '1.0',
@@ -325,9 +344,6 @@ export const DEFAULT_ASSET_MANIFEST: AssetManifest = {
     { asset_id: 'landmark.forge', kind: 'procedural', source: 'procedural', primitive: 'forge', uri: null, license: null, attribution: null, generated: null },
     { asset_id: 'landmark.portal', kind: 'procedural', source: 'procedural', primitive: 'portal', uri: null, license: null, attribution: null, generated: null },
     { asset_id: 'landmark.town_hall', kind: 'procedural', source: 'procedural', primitive: 'town_hall', uri: null, license: null, attribution: null, generated: null },
-    { asset_id: 'sprites.arcane', kind: 'sprite_sheet', source: 'local', uri: '/assets/sprites/arcane.png', primitive: null, license: 'CC0', attribution: 'internal-library', generated: null },
-    { asset_id: 'sprites.verdant', kind: 'sprite_sheet', source: 'local', uri: '/assets/sprites/verdant.png', primitive: null, license: 'CC0', attribution: 'internal-library', generated: null },
-    { asset_id: 'landmark.tower.external', kind: 'glb', source: 'external', uri: 'https://cdn.example.com/assets/tower.glb', primitive: null, license: 'CC-BY-4.0', attribution: 'example-library', generated: null },
   ],
 };
 

@@ -66,15 +66,45 @@ describe('Game Runtime', () => {
     expect(next.codex).toContain(landmark.architecture_entity_id);
   });
 
-  it('completes the survey quest after inspecting every landmark', () => {
+  it('completes the survey quest after inspecting every landmark and passing the quiz', () => {
     const { pack } = setup();
     let state = createInitialGameState(pack);
     state = reduceGameState(pack, state, { type: 'talk', npcId: 'npc_guide' });
     for (const landmark of pack.landmarks) {
       state = reduceGameState(pack, state, { type: 'interact', interactionId: landmark.interaction_id });
     }
-    const survey = state.quests.find((q) => q.quest_id === 'q_survey');
-    expect(survey?.status).toBe('completed');
+
+    // Objectives alone are not enough: the survey quest carries a verifiable
+    // quiz, so it stays active until the player answers correctly.
+    const beforeQuiz = state.quests.find((q) => q.quest_id === 'q_survey');
+    expect(beforeQuiz?.status).toBe('active');
+
+    const survey = pack.quests.find((q) => q.id === 'q_survey')!;
+    expect(survey.quiz).not.toBeNull();
+    state = reduceGameState(pack, state, {
+      type: 'quiz_answer',
+      questId: 'q_survey',
+      choiceIndex: survey.quiz!.correct,
+    });
+
+    expect(state.quests.find((q) => q.quest_id === 'q_survey')?.status).toBe('completed');
+  });
+
+  it('rejects a wrong quiz answer', () => {
+    const { pack } = setup();
+    let state = createInitialGameState(pack);
+    state = reduceGameState(pack, state, { type: 'talk', npcId: 'npc_guide' });
+    for (const landmark of pack.landmarks) {
+      state = reduceGameState(pack, state, { type: 'interact', interactionId: landmark.interaction_id });
+    }
+
+    const survey = pack.quests.find((q) => q.id === 'q_survey')!;
+    const wrong = (survey.quiz!.correct + 1) % survey.quiz!.choices.length;
+    state = reduceGameState(pack, state, { type: 'quiz_answer', questId: 'q_survey', choiceIndex: wrong });
+
+    const progress = state.quests.find((q) => q.quest_id === 'q_survey');
+    expect(progress?.quiz_passed).toBe(false);
+    expect(progress?.status).toBe('active');
   });
 
   it('opens and closes dialogue deterministically', () => {

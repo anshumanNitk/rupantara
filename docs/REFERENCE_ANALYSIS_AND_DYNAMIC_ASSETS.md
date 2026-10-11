@@ -376,3 +376,69 @@ image-generation story. Everything else in Part 4 depends on the resolver being 
 reference's gameplay patterns (resolver chain → pack builder → playtest → dialogue provider) gives you
 dynamic worlds and dynamic packs **without weakening the invariant** that architecture is data and the
 game is a deterministic interpretation of it.
+
+---
+
+## Part 8 — Implementation status
+
+Phases A–F are **implemented and verified** (113 TS tests, 119 Python tests, clean typecheck, clean
+production build).
+
+| Phase | Status | Where |
+| --- | --- | --- |
+| **A** — provider-chain resolver | ✅ done | `game/registries/assetResolver.ts` (`AssetProvider`, `ProceduralProvider`, `CatalogProvider`, `GeneratorProvider`, `PlaceholderProvider`, `AssetResolver` with `trace`/`has`/`assetReport`, `createDefaultResolver`, `createThemeResolver`) |
+| **B** — `PackBuilder` + tools | ✅ done | `game/agent/packBuilder.ts` (`TOOL_DEFS`, `PackBuilder.call`, `findFreeSpot`) |
+| **C** — playtest bot | ✅ done | `game/agent/playtest.ts` (`playtest(pack)` → `{ok, steps, log, stuck, quests}`) |
+| **D** — `DialogueProvider` + LLM | ✅ done | `game/dialogue/providers.ts`, `game/dialogue/llmClient.ts`, `components/rpg/useDialogue.ts`, `services/architecture/dialogue_agent.py`, `app/api/dialogue/route.ts` |
+| **E** — image-gen route + generator | ✅ done | `app/api/assets/generate/route.ts`, `game/registries/imageGeneratorProvider.ts` |
+| **F** — curated theme packs | ✅ done | `game/registries/themeCatalogs.ts` (`ARCANE_CATALOG`, `VERDANT_CATALOG`, `catalogForTheme`) |
+| **G** — DAG quests + quizzes | ✅ done | quests mirror the DAG via `topologicalOrder`; `questCompiler.buildQuiz()` derives verifiable quizzes from real edges; `QuizPanel` + `quiz_answer` action |
+| **H** — deterministic analyzer fallback | ⬜ pending | — |
+
+**The playtest bot immediately earned its keep.** It found a real, shipped bug: the `q_replay`
+quest's objective was `kind: 'visit'` targeting an NPC, but the reducer only completed `kind: 'talk'`
+objectives when you talked — so that quest was **unwinnable**. The fix: talking to an NPC now
+completes *any* objective targeting that NPC (`talk` and `visit` alike). This is exactly the class of
+bug that schema validation cannot catch and a playtest can.
+
+**Safety model, as implemented.** The LLM dialogue provider grounds each NPC in `facts` taken from the
+narrative character, treats player text as untrusted, and falls back to the scripted tree on any
+failure. The Python `dialogue_agent.py` mirrors the same rules so the guarantee holds whether dialogue
+is generated in the browser or server-side. Generated images supply appearance only, never structure.
+
+---
+
+## Part 9 — Making it feel like a game (round 2)
+
+The first pass produced a working pipeline that still *read* as an architecture diagram: scattered
+landmarks joined by thin A* lines. This round turned it into a place.
+
+**The map is now a town.** `mapCompiler.ts` was rewritten so every architecture **zone becomes a
+district** — a quarter with a plaza ring, a coloured floor and its own buildings. Districts are
+ordered **west → east by dependency layer**, so the town reads like the codebase: foundations on the
+west, high-level code east. Roads are carved between districts that actually depend on each other, and
+a water border plus scattered trees frame the town. `TileMap` gained `districts` and `decorations`.
+
+**Image generation is now visible.** Three separate bugs were hiding it:
+
+1. The exact procedural provider always won (the renderer passes a `primitive`), so the generator was
+   never reached. Fixed with an explicit `AssetRequest.generate` opt-in.
+2. The curated theme catalogs pointed at `/assets/curated/*.glb` files that do not exist. The catalog
+   matched first, returned a 404 URL, and the generator was never reached. Catalogs are now empty by
+   default.
+3. Image models draw a literal **checkerboard** instead of transparency. The prompt now asks for a
+   flat magenta background, and the renderer chroma-keys magenta and checkerboard grey out on a canvas.
+
+It now runs on the **same `OPENROUTER_API_KEY`** as the agents, using
+`google/gemini-3.1-flash-image` (Nano Banana 2) — no extra key required.
+
+**Understanding is now verifiable.** Quests carry an optional `quiz` whose answer is derived from real
+dependency edges, never invented by a model. A quest with a quiz only completes once the quiz is
+passed, so "did the player understand?" is checkable rather than assumed. The playtest bot answers
+quizzes correctly, so a pack is only "winnable" if its quiz is solvable.
+
+**Two narrative bugs fixed.** The grounding validator's cycle detector flagged *any* node reached
+twice, so every diamond DAG (`A→B, A→C, B→D, C→D`) was falsely reported as a cycle — this made the
+agent 502 on most real repositories. It now uses proper three-colour DFS. Separately, a deterministic
+`_break_mission_cycles()` repairs a genuinely cyclic story in-process instead of spending another slow
+model round-trip. Verified live: the narrative now returns 4 characters, 8 missions and 9 beats.

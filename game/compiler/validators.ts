@@ -225,26 +225,53 @@ function validatePlacement(pack: GamePack): string[] {
   return errors;
 }
 
+/**
+ * Returns the ids of every node that lies on a prerequisite cycle.
+ *
+ * A naive "have I seen this node before?" walk reports a FALSE cycle for any
+ * diamond DAG (A -> B, A -> C, B -> D, C -> D), because D is reached twice by
+ * two different, perfectly legal paths. A real cycle exists only when a node is
+ * reached again while it is still on the CURRENT DFS path, so we track the
+ * active path with three colours (white = unvisited, grey = on path, black =
+ * finished).
+ */
+export function findCycleNodes(prerequisites: Map<string, readonly string[]>): Set<string> {
+  const WHITE = 0;
+  const GREY = 1;
+  const BLACK = 2;
+  const colour = new Map<string, number>([...prerequisites.keys()].map((id) => [id, WHITE]));
+  const onCycle = new Set<string>();
+  const path: string[] = [];
+
+  const visit = (node: string): void => {
+    colour.set(node, GREY);
+    path.push(node);
+    for (const dep of prerequisites.get(node) ?? []) {
+      const state = colour.get(dep);
+      if (state === undefined) continue; // unknown prerequisites are reported elsewhere
+      if (state === GREY) {
+        // Everything from `dep` to the top of the path forms the cycle.
+        for (let i = path.lastIndexOf(dep); i < path.length; i += 1) onCycle.add(path[i]!);
+      } else if (state === WHITE) {
+        visit(dep);
+      }
+    }
+    path.pop();
+    colour.set(node, BLACK);
+  };
+
+  for (const id of [...prerequisites.keys()].sort((a, b) => a.localeCompare(b))) {
+    if (colour.get(id) === WHITE) visit(id);
+  }
+  return onCycle;
+}
+
 /** Quest prerequisites must form a DAG (no cycles). */
 function validateQuestGraph(pack: GamePack): string[] {
-  const errors: string[] = [];
   const prereqs = new Map(pack.quests.map((q) => [q.id, q.prerequisites]));
-
-  for (const quest of pack.quests) {
-    const seen = new Set<string>([quest.id]);
-    const stack = [...quest.prerequisites];
-    while (stack.length > 0) {
-      const current = stack.pop()!;
-      if (seen.has(current)) {
-        errors.push(`Quest cycle detected involving "${quest.id}"`);
-        break;
-      }
-      seen.add(current);
-      stack.push(...(prereqs.get(current) ?? []));
-    }
-  }
-
-  return errors;
+  return [...findCycleNodes(prereqs)]
+    .sort((a, b) => a.localeCompare(b))
+    .map((id) => `Quest cycle detected involving "${id}"`);
 }
 
 /**

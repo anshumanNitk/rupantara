@@ -7,7 +7,7 @@ import type { TileCoord, Facing } from '@/game/schemas/common';
 import { resolveSprite } from '@/game/registries/spriteRegistry';
 import { TileMapRenderer } from './TileMapRenderer';
 import { LandmarkRenderer } from './LandmarkRenderer';
-import { SpriteBillboard } from './SpriteBillboard';
+import { NpcWanderer } from './NpcWanderer';
 import { PlayerController } from './PlayerController';
 import { RpgCameraController } from './RpgCameraController';
 import { findNearbyInteractable } from './interactionSystem';
@@ -41,6 +41,10 @@ export function RpgWorldRenderer({
   onSelectLandmark,
   onSelectNpc,
 }: RpgWorldRendererProps) {
+  const characterByEntity = useMemo(
+    () => new Map((pack.narrative?.characters ?? []).map((character) => [character.architecture_node_id, character])),
+    [pack.narrative],
+  );
   const nearby = useMemo(
     () => findNearbyInteractable(pack, state.player.position, Math.ceil(tokens.interactRadius)),
     [pack, state.player.position, tokens.interactRadius],
@@ -58,6 +62,13 @@ export function RpgWorldRenderer({
       }
     }
     return completed;
+  }, [pack.quests, state.quests]);
+
+  const activeLandmarkId = useMemo(() => {
+    const current = pack.quests.find((quest) => state.quests.find((progress) => progress.quest_id === quest.id)?.status === 'active');
+    if (!current) return null;
+    const progress = state.quests.find((item) => item.quest_id === current.id);
+    return current.objectives.find((objective) => !progress?.completed_objectives.includes(objective.id))?.landmark_id ?? null;
   }, [pack.quests, state.quests]);
 
   return (
@@ -88,22 +99,19 @@ export function RpgWorldRenderer({
           tileSize={pack.map.tile_size}
           focused={nearby?.kind === 'landmark' && nearby.id === landmark.id}
           completed={completedLandmarks.has(landmark.id)}
+          active={activeLandmarkId === landmark.id}
           onSelect={onSelectLandmark}
         />
       ))}
 
       {pack.npcs.map((npc) => (
-        <SpriteBillboard
+        <NpcWanderer
           key={npc.id}
-          sprite={resolveSprite(npc.sprite)}
-          position={{
-            x: (npc.position.x + 0.5) * pack.map.tile_size,
-            y: 0,
-            z: (npc.position.y + 0.5) * pack.map.tile_size,
-          }}
-          label={npc.label}
+          npc={npc}
+          pack={pack}
           highlighted={nearby?.kind === 'npc' && nearby.id === npc.id}
-          onClick={() => onSelectNpc(npc.id)}
+          onSelect={onSelectNpc}
+          portraitPrompt={npc.architecture_entity_id ? characterByEntity.get(npc.architecture_entity_id)?.portrait_prompt : null}
         />
       ))}
 

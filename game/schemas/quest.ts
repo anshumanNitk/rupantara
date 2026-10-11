@@ -30,6 +30,28 @@ export const ObjectiveSchema = z.object({
 });
 export type Objective = z.infer<typeof ObjectiveSchema>;
 
+/**
+ * Quiz — a verifiable question about the architecture.
+ *
+ * The answer is derived from the dependency graph, never invented by a model,
+ * so "did the player understand?" is checkable. A quiz is optional: a quest
+ * without one is completed by its objectives alone.
+ */
+export const QuizSchema = z.object({
+  id: IdSchema,
+  question: z.string().min(1),
+  choices: z.array(z.string().min(1)).min(2),
+  /** Index into `choices` of the correct answer. */
+  correct: z.number().int().nonnegative(),
+  /** Architecture entity the question is about. */
+  architecture_entity_id: z.string().nullable().default(null),
+  /** Shown when the player answers correctly. */
+  success_text: z.string().default('Correct.'),
+  /** Shown when the player answers incorrectly. */
+  failure_text: z.string().default('Not quite. Follow the roads and try again.'),
+});
+export type Quiz = z.infer<typeof QuizSchema>;
+
 export const QuestSchema = z.object({
   id: IdSchema,
   title: z.string().min(1),
@@ -44,5 +66,7 @@ export const QuestSchema = z.object({
   concepts: z.array(z.string()).default([]),
   /** Whether this quest is required for the main path. */
   main_path: z.boolean().default(true),
+  /** Optional verifiable question that proves understanding. */
+  quiz: QuizSchema.nullable().default(null),
 });
 export type Quest = z.infer<typeof QuestSchema>;

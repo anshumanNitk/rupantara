@@ -13,6 +13,7 @@ repository analysis and scene composition only.
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +27,7 @@ from contracts import (
     NarrativeRequest,
     NarrativeResponse,
 )
+from dialogue_agent import generate_reply
 from narrative_agent import write_narrative
 from repo_fetcher import RateLimitError, RepositoryFetchError, parse_repo_url
 from scene_agent import generate_scene
@@ -80,6 +82,26 @@ class SceneValidateResponse(BaseModel):
     ok: bool
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class DialogueTurn(BaseModel):
+    role: Literal["npc", "player"]
+    text: str
+
+
+class DialogueRequest(BaseModel):
+    """One grounded NPC conversation turn."""
+
+    name: str
+    world_name: str = "the realm"
+    persona: str | None = None
+    motivation: str | None = None
+    facts: list[str] = Field(default_factory=list)
+    history: list[DialogueTurn] = Field(default_factory=list)
+
+
+class DialogueResponse(BaseModel):
+    text: str
 
 
 @app.get("/health")
@@ -183,6 +205,30 @@ def narrative_generate(request: NarrativeRequest) -> NarrativeResponse:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return NarrativeResponse(narrative=narrative, warnings=warnings)
+
+
+@app.post("/projects/dialogue/generate", response_model=DialogueResponse)
+def dialogue_generate(request: DialogueRequest) -> DialogueResponse:
+    """One grounded NPC conversation turn.
+
+    The caller supplies the NPC's persona and the facts it is allowed to state.
+    The model writes prose only; it cannot invent components, and player input is
+    treated as untrusted.
+    """
+    try:
+        text = generate_reply(
+            name=request.name,
+            persona=request.persona,
+            motivation=request.motivation,
+            facts=request.facts,
+            world_name=request.world_name,
+            history=[turn.model_dump() for turn in request.history],
+        )
+    except Exception as exc:  # noqa: BLE001 - surfaced to the caller as 502
+        logger.exception("Dialogue generation failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return DialogueResponse(text=text)
 
 
 @app.post("/projects/scene/generate", response_model=SceneGenerateResponse)

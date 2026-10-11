@@ -155,6 +155,7 @@ export function PlayerController({
       scale={1.1}
       label="You"
       labelColor={tokens.accent}
+      portraitUri="/game-art/field-guide-v1.png"
     />
   );
 }
